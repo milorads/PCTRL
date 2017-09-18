@@ -9,27 +9,15 @@ void setup(void)
   Serial.begin(115200);
   Serial.println();
   Serial.print("Configuring access point...");
-  //IPAddress ip(192, 168, 1, 7);
-  //WiFi.hostname(prijava);
-  //wifi_station_set_hostname( "test11" );
   WiFi.softAP(ssid);
   Serial.println("");
   Serial.print("IP address: ");
   Serial.println(WiFi.softAPIP());
   Serial.print("Hostname: ");
-  //Serial.println(WiFi.hostname());
-
-  //if (mdns.begin("prijava", WiFi.softAPIP())) {
-    //Serial.println("MDNS responder started");
-  //}
   
   server.on("/", [](){
     server.send(200, "text/html", webPage);
   });
-  //server.on("/Metoda1", [](){
-    //server.send(200, "text/html", webPage);
-    //delay(1000); 
-  //});
   server.begin();
   Serial.println("HTTP server started");
 
