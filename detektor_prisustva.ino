@@ -50,7 +50,7 @@ void setup(void)
   Serial.println("");
   Serial.print("IP address: ");
   Serial.println(WiFi.softAPIP());
-  Serial.print("Hostname: ");
+  //Serial.print("Hostname: ");
   //Serial.println(WiFi.hostname());
 
   //if (mdns.begin("prijava", WiFi.softAPIP())) {
@@ -84,8 +84,8 @@ void setup(void)
   rtc.Enable32kHzPin(false);
   rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
 
-  String datum = convertDateToStr(rtc.GetDateTime()); 
-  myFile = SD.open("ARP_" + datum + ".txt", FILE_WRITE);
+  String datum = convertDateToStr(rtc.GetDateTime());
+  myFile = SD.open(datum + ".txt", FILE_WRITE);
   if (myFile)
   {
     Serial.println("Creating file ARP_" + datum + ".txt...");
@@ -112,13 +112,17 @@ void client_status()
   struct station_info *stat_info;
   stat_info = wifi_softap_get_station_info();
 
-  struct ip_addr *IPaddress;
-  IPAddress address;
+  //struct ip_addr *IPaddress;
+  //IPAddress address;
 
   String datum = convertDateToStr(rtc.GetDateTime());
 
+  boolean kandidat = false;
+  
   while (stat_info != NULL)
   {
+    kandidat = true;
+    
     String t = convertToStr(rtc.GetDateTime());
     String mac = "";
     mac += ((String(stat_info->bssid[0],HEX).length()) == 2)? String(stat_info->bssid[0],HEX) : "0" + String(stat_info->bssid[0],HEX);
@@ -128,57 +132,78 @@ void client_status()
     mac += ((String(stat_info->bssid[4],HEX).length()) == 2)? String(stat_info->bssid[4],HEX) : "0" + String(stat_info->bssid[4],HEX);
     mac += ((String(stat_info->bssid[5],HEX).length()) == 2)? String(stat_info->bssid[5],HEX) : "0" + String(stat_info->bssid[5],HEX);
 
-    IPaddress = &stat_info->ip;
-    address = IPaddress->addr;
+    //IPaddress = &stat_info->ip;
+    //address = IPaddress->addr;
+    //Serial.print((address));
 
     boolean prisutan = false;
 
-    myFile = SD.open("ARP_" + datum + ".txt");
+    myFile = SD.open(datum + ".txt");
     if (myFile)
     {
       int br_korisnika = 1;
       
       while (myFile.available() && !prisutan) 
       {     
-        String line = myFile.readStringUntil('\n');
+        String line_mac = myFile.readStringUntil('|');
+
+        String line_range;
+        int br = 3;
+        while (br--)
+        {
+          if (br > 0)
+          {
+            line_range = myFile.readStringUntil('|');
+          }
+          else
+          {
+            line_range = myFile.readStringUntil('\n');
+          }
+        }
         
-        String line_ip = "";
-        int i = 0;
-        for (; line[i] != '|'; line_ip[i] = line[i++]);
-        
-        String line_mac = "";
-        i++;
-        for (; line[i] != '|'; line_mac[i] = line[i++]);
+        //String line_ip = "";
+        //int i = 0;
+        //for (; line[i] != '|'; line_ip[i] += line[i++]);
+
+        if (line_range == "0")
+        {
+          continue;
+        }
 
         if (mac == line_mac)
         {
           prisutan = true;
           
-          prijavljeni[br_korisnika-1] = "1";
+          prijavljeni[br_korisnika-1] = "1 " + mac;
         }
         else
         {
-          if (prijavljeni[br_korisnika-1] == "1")
+          if (prijavljeni[br_korisnika-1][1] == ' ')
           {
-            prijavljeni[br_korisnika-1] = line_ip + "|" + line_mac + "|" + convertToStr(rtc.GetDateTime()) + "|0";
+            prijavljeni[br_korisnika-1] = line_mac + "|" + convertToStr(rtc.GetDateTime()) + "|0";
           }
         }
+
+        line_mac = myFile.readStringUntil('\n');
+        line_range = myFile.read();
+
+        br_korisnika++;
       }
       myFile.close();
     }
     else
     {
-      Serial.println("error opening ARP" + datum + ".txt");
+      Serial.println("error opening ARP_" + datum + ".txt");
     }
     
     if (!prisutan)
     {
-      myFile = SD.open("ARP_" + datum + ".txt", FILE_WRITE);
+      myFile = SD.open(datum + ".txt", FILE_WRITE);
       if (myFile)
       {
         Serial.println("Writing new students...");
-        myFile.print(address);
-        myFile.print("|");
+        //myFile.print((address));
+        //myFile.print("|");
         myFile.print(mac);
         myFile.print("|");
         myFile.print(t);
@@ -188,31 +213,46 @@ void client_status()
       }
       else
       {
-        Serial.println("error opening ARP" + datum + ".txt");
+        Serial.println("error opening ARP_" + datum + ".txt");
       }
     }
 
     stat_info = STAILQ_NEXT(stat_info, next);
   }
 
-  myFile = SD.open("ARP_" + datum + ".txt", FILE_WRITE);
+  if (!kandidat)
+  {
+    for (int i = 0; i < MAX; i++)
+    {
+      if (prijavljeni[i][1] == ' ')
+      {
+        String prijavljeni_mac = "";
+        for (int j = 1; prijavljeni[i][j] != '\0'; prijavljeni_mac += prijavljeni[i][j++]);
+        
+        prijavljeni[i] = prijavljeni_mac + "|" + convertToStr(rtc.GetDateTime()) + "|0";
+      }
+    }
+  }
+
+  myFile = SD.open(datum + ".txt", FILE_WRITE);
   if (myFile)
   {
     for (int i = 0; i < MAX; i++)
     {
-      if (prijavljeni[i] != "1" || prijavljeni[i] != "0")
+      if (prijavljeni[i][1] != ' ' && prijavljeni[i] != "0")
       {
         Serial.println("Writing an offline student...");
         myFile.println(prijavljeni[i]);
         Serial.println("Done.");
+
+        prijavljeni[i] = "0";
       }
-    }
-    
+    } 
     myFile.close();
   }
   else
   {
-    Serial.println("error opening ARP" + datum + ".txt");
+    Serial.println("error opening ARP_" + datum + ".txt");
   }
 
   delay(500);
@@ -242,10 +282,10 @@ String convertDateToStr(const RtcDateTime& dt)
 
     snprintf_P(datestring, 
             countof(datestring),
-            PSTR("%02u_%02u_%04u"),
+            PSTR("%02u%02u%04u"),
             dt.Day(),
             dt.Month(),
             dt.Year());
     datum = datestring;
-    return datum;
+    return datestring;
 }
