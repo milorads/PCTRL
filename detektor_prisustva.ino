@@ -16,9 +16,15 @@ extern "C" {
 
 const char* ssid = "Proba";
 
-ESP8266WebServer server(80);
+//mac i ip promenljive
+unsigned char mac[6];
+unsigned char ip[4];
 
-String webPage = "";
+const char *webPage = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
+const char *err_msg1 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"red\"> Greska pri unosu </font> \r\n<br><br><br></html> \n";
+const char *err_msg2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Uspesan unos!! </font> \r\n<br><br><br></html> \n";
+
+ESP8266WebServer server(80);
 
 File myFile;
 File myFile2;
@@ -28,13 +34,82 @@ String prijavljeni[MAX];
 //DS1302 rtc(2, 3, 4);
 RtcDS3231<TwoWire> rtc(Wire);
 
+void handleRoot()
+{
+  server.send(200,"text/html",webPage);
+  String add = server.client().remoteIP().toString();
+  Serial.println(add);
+}
+
+void handleData()
+{
+  struct ip_addr *IPaddress;
+  IPAddress address;
+
+  bool err_flag = false;
+  
+  if((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
+  {
+    err_flag = true;
+  }
+
+  //provera flega za greske
+  if(err_flag)
+  {
+    server.send(200,"text/html",err_msg1);
+  }
+  else
+  {
+    //ocitavanje podataka
+    String par_ime = server.arg("polje_ime");
+    String par_prezime = server.arg("polje_prezime");
+    String par_id = server.arg("polje_id");
+    
+    struct station_info *stat_info;
+    
+    stat_info = wifi_softap_get_station_info();
+
+    while ( STAILQ_NEXT(stat_info, next)!= NULL)
+    {
+      stat_info =  STAILQ_NEXT(stat_info, next);
+    }
+    IPaddress = &stat_info -> ip;
+    address = IPaddress->addr;
+
+    //zapisivanje adrese
+    ip[0] = address[0];
+    ip[1] = address[1];
+    ip[2] = address[2];
+    ip[3] = address[3];
+
+    //zapisivanje fizicke adrese
+    mac[0] = stat_info->bssid[0];
+    mac[1] = stat_info->bssid[1];
+    mac[2] = stat_info->bssid[2];
+    mac[3] = stat_info->bssid[3];
+    mac[4] = stat_info->bssid[4];
+    mac[5] = stat_info->bssid[5];
+
+    myFile2 = SD.open("reg.txt", FILE_WRITE);
+    if(myFile2)
+    {
+      String ip_str = String(ip[0]) + String(".") + String(ip[1]) + String(".") + String(ip[2]) + String(".") + String(ip[3]);
+      String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") + String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") + String(mac[4], HEX) + String(":") + String(mac[5], HEX);
+      myFile2.println(ip_str + "|" + mac_str + "|" + par_ime + "|" + par_prezime + "|" + par_id);
+      myFile2.close();
+      Serial.println("Upis zavrsen");
+    }
+    else
+    {
+      Serial.println("greska pri otvaranju");
+    }
+    
+    server.send(200,"text/html",err_msg2);
+  }  
+}
+
 void setup(void)
 {  
-  webPage += "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><script>strText='';function SendText(){var request=new XMLHttpRequest();";
-  webPage += "strText='Metoda1/'+document.getElementById('txt_form').form_text.value;request.open('GET',strText,true);request.send(null);}</script></head>";
-  webPage += "<h1>Registracija</h1><body><form id='txt_form' name='frmText'><p>Broj indeksa: <br><textarea name='form_text' rows='1' cols='9' maxlength='9'></textarea>";
-  webPage += "</p></form><input type='submit' value='Potvrdi' onclick='SendText()'/></body></html>";
-  
   delay(1000);
   Serial.begin(115200);
   Serial.println();
@@ -43,10 +118,9 @@ void setup(void)
   Serial.println("");
   Serial.print("IP address: ");
   Serial.println(WiFi.softAPIP());
-  
-  server.on("/", [](){
-    server.send(200, "text/html", webPage);
-  });
+
+  server.on("/",handleRoot);
+  server.on("/metoda1",handleData);
   server.begin();
   Serial.println("HTTP server started");
 
@@ -100,19 +174,19 @@ void client_status()
      
       while (stat_info != NULL)
       {
-        String mac = "";
-        mac += ((String(stat_info->bssid[0],HEX).length()) == 2)? String(stat_info->bssid[0],HEX) : "0" + String(stat_info->bssid[0],HEX);
-        mac += ((String(stat_info->bssid[1],HEX).length()) == 2)? String(stat_info->bssid[1],HEX) : "0" + String(stat_info->bssid[1],HEX);
-        mac += ((String(stat_info->bssid[2],HEX).length()) == 2)? String(stat_info->bssid[2],HEX) : "0" + String(stat_info->bssid[2],HEX);
-        mac += ((String(stat_info->bssid[3],HEX).length()) == 2)? String(stat_info->bssid[3],HEX) : "0" + String(stat_info->bssid[3],HEX);
-        mac += ((String(stat_info->bssid[4],HEX).length()) == 2)? String(stat_info->bssid[4],HEX) : "0" + String(stat_info->bssid[4],HEX);
-        mac += ((String(stat_info->bssid[5],HEX).length()) == 2)? String(stat_info->bssid[5],HEX) : "0" + String(stat_info->bssid[5],HEX);
+        String mac1 = "";
+        mac1 += String(stat_info->bssid[0],HEX);
+        mac1 += String(stat_info->bssid[1],HEX);
+        mac1 += String(stat_info->bssid[2],HEX);
+        mac1 += String(stat_info->bssid[3],HEX);
+        mac1 += String(stat_info->bssid[4],HEX);
+        mac1 += String(stat_info->bssid[5],HEX);
 
         IPaddress = &stat_info->ip;
         address = IPaddress->addr;
-        String ip = IpAddress2String(address);
+        String ip1 = IpAddress2String(address);
         
-        if (ip == line_ip)
+        if (ip1 == line_ip)
         {
           prisutan = true;
 
@@ -120,7 +194,7 @@ void client_status()
           {
             novi = true;
             
-            prijavljeni[br_korisnika-1] = line_ip + "|" + mac + "|" + t + "|1";
+            prijavljeni[br_korisnika-1] = line_ip + "|" + mac1 + "|" + t + "|1";
           }
         }
         stat_info = STAILQ_NEXT(stat_info, next); 
