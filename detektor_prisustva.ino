@@ -12,13 +12,11 @@ extern "C" {
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
 #define MAX 3
-#define date (convertDateToStr(rtc.GetDateTime()))
 
 const char* ssid = "Proba";
 
-//mac i ip promenljive
+//mac promenljiva
 unsigned char mac[6];
-unsigned char ip[4];
 
 const char *webPage = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
 const char *err_msg1 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"red\"> Greska pri unosu </font> \r\n<br><br><br></html> \n";
@@ -34,18 +32,15 @@ String prijavljeni[MAX];
 //DS1302 rtc(2, 3, 4);
 RtcDS3231<TwoWire> rtc(Wire);
 
+struct station_info *stat_info;
+
 void handleRoot()
 {
   server.send(200,"text/html",webPage);
-  String add = server.client().remoteIP().toString();
-  Serial.println(add);
 }
 
 void handleData()
 {
-  struct ip_addr *IPaddress;
-  IPAddress address;
-
   bool err_flag = false;
   
   if((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
@@ -65,23 +60,24 @@ void handleData()
     String par_prezime = server.arg("polje_prezime");
     String par_id = server.arg("polje_id");
     
-    struct station_info *stat_info;
-    
     stat_info = wifi_softap_get_station_info();
 
-    while ( STAILQ_NEXT(stat_info, next)!= NULL)
+    struct ip_addr *IPaddress;
+    IPAddress address;
+
+    while (stat_info != NULL)
     {
-      stat_info =  STAILQ_NEXT(stat_info, next);
+      IPaddress = &stat_info->ip;
+      address = IPaddress->addr;
+
+      if (address == server.client().remoteIP())
+      {
+        break;
+      }
+      
+      stat_info = STAILQ_NEXT(stat_info, next);
     }
-    IPaddress = &stat_info -> ip;
-    address = IPaddress->addr;
-
-    //zapisivanje adrese
-    ip[0] = address[0];
-    ip[1] = address[1];
-    ip[2] = address[2];
-    ip[3] = address[3];
-
+    
     //zapisivanje fizicke adrese
     mac[0] = stat_info->bssid[0];
     mac[1] = stat_info->bssid[1];
@@ -90,13 +86,15 @@ void handleData()
     mac[4] = stat_info->bssid[4];
     mac[5] = stat_info->bssid[5];
 
-    myFile2 = SD.open("reg.txt", FILE_WRITE);
-    if(myFile2)
+    myFile = SD.open("reg.txt", FILE_WRITE);
+    if(myFile)
     {
-      String ip_str = String(ip[0]) + String(".") + String(ip[1]) + String(".") + String(ip[2]) + String(".") + String(ip[3]);
-      String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") + String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") + String(mac[4], HEX) + String(":") + String(mac[5], HEX);
-      myFile2.println(ip_str + "|" + mac_str + "|" + par_ime + "|" + par_prezime + "|" + par_id);
-      myFile2.close();
+      String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") +\
+                       String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") +\
+                       String(mac[4], HEX) + String(":") + String(mac[5], HEX);
+      
+      myFile.println(mac_str + "|" + par_ime + "|" + par_prezime + "|" + par_id);
+      myFile.close();
       Serial.println("Upis zavrsen");
     }
     else
@@ -118,6 +116,13 @@ void setup(void)
   Serial.println("");
   Serial.print("IP address: ");
   Serial.println(WiFi.softAPIP());
+
+  struct softap_config config;
+  wifi_softap_get_config(&config); // Get config first.
+
+  config.max_connection = 30; // how many stations can connect to ESP8266 softAP at most.
+
+  wifi_softap_set_config(&config);// Set ESP8266 softap config
 
   server.on("/",handleRoot);
   server.on("/metoda1",handleData);
@@ -144,6 +149,8 @@ void setup(void)
  
 void loop(void)
 {
+  String date = convertDateToStr(rtc.GetDateTime());
+  
   server.handleClient();
   delay(5000);
   client_status();
@@ -152,11 +159,6 @@ void loop(void)
 
 void client_status()
 {
-  struct station_info *stat_info;
-
-  struct ip_addr *IPaddress;
-  IPAddress address;
-
   myFile = SD.open("reg.txt");
   if (myFile)
   {
@@ -169,24 +171,23 @@ void client_status()
       boolean prisutan = false;
       boolean novi = false;
 
-      String t = convertToStr(rtc.GetDateTime());     
-      String line_ip = myFile.readStringUntil('|');
+      String t = convertToStr(rtc.GetDateTime());   
+      String line_mac = myFile.readStringUntil('|');
      
       while (stat_info != NULL)
       {
-        String mac1 = "";
-        mac1 += String(stat_info->bssid[0],HEX);
-        mac1 += String(stat_info->bssid[1],HEX);
-        mac1 += String(stat_info->bssid[2],HEX);
-        mac1 += String(stat_info->bssid[3],HEX);
-        mac1 += String(stat_info->bssid[4],HEX);
-        mac1 += String(stat_info->bssid[5],HEX);
+        mac[0] = stat_info->bssid[0];
+        mac[1] = stat_info->bssid[1];
+        mac[2] = stat_info->bssid[2];
+        mac[3] = stat_info->bssid[3];
+        mac[4] = stat_info->bssid[4];
+        mac[5] = stat_info->bssid[5];
 
-        IPaddress = &stat_info->ip;
-        address = IPaddress->addr;
-        String ip1 = IpAddress2String(address);
+        String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") +\
+                         String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") +\
+                         String(mac[4], HEX) + String(":") + String(mac[5], HEX);
         
-        if (ip1 == line_ip)
+        if (mac_str == line_mac)
         {
           prisutan = true;
 
@@ -194,7 +195,7 @@ void client_status()
           {
             novi = true;
             
-            prijavljeni[br_korisnika-1] = line_ip + "|" + mac1 + "|" + t + "|1";
+            prijavljeni[br_korisnika-1] = line_mac + "|" + t + "|1";
           }
         }
         stat_info = STAILQ_NEXT(stat_info, next); 
@@ -212,13 +213,10 @@ void client_status()
         else if (!prisutan)
         {
           if (prijavljeni[br_korisnika-1] != "/")
-          {
-            int n = prijavljeni[br_korisnika-1].length();
-            prijavljeni[br_korisnika-1][n-1] = '0';
-            
+          { 
             Serial.print(br_korisnika);
             Serial.println(". student is out of range.");
-            myFile2.println(prijavljeni[br_korisnika-1]);
+            myFile2.println(line_mac + "|" + convertToStr(rtc.GetDateTime()) + "|0");
             prijavljeni[br_korisnika-1] = "/";
           }
         }
@@ -230,7 +228,7 @@ void client_status()
       }
       br_korisnika++;
 
-      line_ip = myFile.readStringUntil('\n');
+      line_mac = myFile.readStringUntil('\n');
     }
     myFile.close();
   }
@@ -270,9 +268,4 @@ String convertDateToStr(const RtcDateTime& dt)
             dt.Month());
     datum = datestring;
     return datestring;
-}
-
-String IpAddress2String(const IPAddress& ipAddress)
-{
-  return String(ipAddress[0]) + "." + String(ipAddress[1]) + String(".") + String(ipAddress[2]) + "." + String(ipAddress[3]);
 }
