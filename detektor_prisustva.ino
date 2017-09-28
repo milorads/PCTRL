@@ -3,6 +3,7 @@
 #include <Wire.h> // must be included here so that Arduino library object file references work
 #include <RtcDS3231.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266Ping.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 
@@ -34,6 +35,9 @@ RtcDS3231<TwoWire> rtc(Wire);
 
 struct station_info *stat_info;
 
+struct ip_addr *IPaddress;
+IPAddress address;
+
 void handleRoot()
 {
   server.send(200,"text/html",webPage);
@@ -43,13 +47,13 @@ void handleData()
 {
   bool err_flag = false;
   
-  if((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
+  if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
   {
     err_flag = true;
   }
 
   //provera flega za greske
-  if(err_flag)
+  if (err_flag)
   {
     server.send(200,"text/html",err_msg1);
   }
@@ -61,9 +65,6 @@ void handleData()
     String par_id = server.arg("polje_id");
     
     stat_info = wifi_softap_get_station_info();
-
-    struct ip_addr *IPaddress;
-    IPAddress address;
 
     while (stat_info != NULL)
     {
@@ -149,8 +150,6 @@ void setup(void)
  
 void loop(void)
 {
-  String date = convertDateToStr(rtc.GetDateTime());
-  
   server.handleClient();
   delay(5000);
   client_status();
@@ -166,6 +165,7 @@ void client_status()
     
     while (myFile.available()) 
     {
+      //wifi_softap_free_station_info();
       stat_info = wifi_softap_get_station_info();
       
       boolean prisutan = false;
@@ -173,6 +173,8 @@ void client_status()
 
       String t = convertToStr(rtc.GetDateTime());   
       String line_mac = myFile.readStringUntil('|');
+
+      bool ret;
      
       while (stat_info != NULL)
       {
@@ -183,6 +185,11 @@ void client_status()
         mac[4] = stat_info->bssid[4];
         mac[5] = stat_info->bssid[5];
 
+        IPaddress = &stat_info->ip;
+        address = IPaddress->addr;
+
+        ret = Ping.ping(address);
+
         String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") +\
                          String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") +\
                          String(mac[4], HEX) + String(":") + String(mac[5], HEX);
@@ -191,26 +198,34 @@ void client_status()
         {
           prisutan = true;
 
-          if (prijavljeni[br_korisnika-1] == "/")
+          if (prijavljeni[br_korisnika-1] == "/" && ret)
           {
             novi = true;
             
             prijavljeni[br_korisnika-1] = line_mac + "|" + t + "|1";
           }
         }
+        
+        //struct station_info *stat_info_previous = stat_info;
         stat_info = STAILQ_NEXT(stat_info, next); 
+        //free(stat_info_previous);
+        //if (stat_info_previous)
+        //{
+          //Serial.println("Ima neki kurac.");
+        //}
       }
 
+      String date = convertDateToStr(rtc.GetDateTime());
       myFile2 = SD.open(date + ".txt", FILE_WRITE);
       if (myFile2)
       {
-        if (novi)
+        if (novi && ret)
         {
           Serial.print(br_korisnika);
           Serial.println(". student is in range.");
           myFile2.println(prijavljeni[br_korisnika-1]);
         }
-        else if (!prisutan)
+        else if (!prisutan || !ret)
         {
           if (prijavljeni[br_korisnika-1] != "/")
           { 
