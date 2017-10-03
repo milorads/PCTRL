@@ -1,7 +1,7 @@
 #include <SD.h>
-//#include <DS1302.h>
-#include <Wire.h> // must be included here so that Arduino library object file references work
-#include <RtcDS3231.h>
+#include <DS1302.h>
+//#include <Time.h>
+//#include <TimeLib.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266Ping.h>
 #include <WiFiClient.h>
@@ -12,7 +12,7 @@ extern "C" {
 }
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
-#define MAX 3
+#define MAX 10
 
 const char* ssid = "Proba";
 
@@ -30,10 +30,8 @@ File myFile2;
 
 String prijavljeni[MAX];
 
-//DS1302 rtc(2, 3, 4);
-RtcDS3231<TwoWire> rtc(Wire);
-
-struct station_info *stat_info;
+//Set pins:  CE, IO,CLK
+DS1302 rtc(0, 4, 5);
 
 struct ip_addr *IPaddress;
 IPAddress address;
@@ -63,7 +61,8 @@ void handleData()
     String par_ime = server.arg("polje_ime");
     String par_prezime = server.arg("polje_prezime");
     String par_id = server.arg("polje_id");
-    
+
+    struct station_info *stat_info;
     stat_info = wifi_softap_get_station_info();
 
     while (stat_info != NULL)
@@ -86,6 +85,8 @@ void handleData()
     mac[3] = stat_info->bssid[3];
     mac[4] = stat_info->bssid[4];
     mac[5] = stat_info->bssid[5];
+
+    wifi_softap_free_station_info();
 
     myFile = SD.open("reg.txt", FILE_WRITE);
     if(myFile)
@@ -143,9 +144,9 @@ void setup(void)
 
   for (int i = 0; i < MAX; prijavljeni[i++] = "/");
   
-  rtc.Begin();
-  rtc.Enable32kHzPin(false);
-  rtc.SetSquareWavePin(DS3231SquareWavePin_ModeNone);
+  // Set the clock to run-mode, and disable the write protection
+  rtc.halt(false);
+  rtc.writeProtect(true);
 }
  
 void loop(void)
@@ -166,12 +167,13 @@ void client_status()
     while (myFile.available()) 
     {
       //wifi_softap_free_station_info();
+      struct station_info *stat_info;
       stat_info = wifi_softap_get_station_info();
       
       boolean prisutan = false;
       boolean novi = false;
 
-      String t = convertToStr(rtc.GetDateTime());   
+      String t = convertToStr(rtc.getTime());   
       String line_mac = myFile.readStringUntil('|');
 
       bool ret;
@@ -188,14 +190,17 @@ void client_status()
         IPaddress = &stat_info->ip;
         address = IPaddress->addr;
 
-        ret = Ping.ping(address);
-
         String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") +\
                          String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") +\
                          String(mac[4], HEX) + String(":") + String(mac[5], HEX);
         
         if (mac_str == line_mac)
         {
+          Serial.print("Free heap:");
+          Serial.println(ESP.getFreeHeap());
+          
+          ret = Ping.ping(address);
+          
           prisutan = true;
 
           if (prijavljeni[br_korisnika-1] == "/" && ret)
@@ -206,20 +211,16 @@ void client_status()
           }
         }
         
-        //struct station_info *stat_info_previous = stat_info;
         stat_info = STAILQ_NEXT(stat_info, next); 
-        //free(stat_info_previous);
-        //if (stat_info_previous)
-        //{
-          //Serial.println("Ima neki kurac.");
-        //}
       }
 
-      String date = convertDateToStr(rtc.GetDateTime());
-      myFile2 = SD.open(date + ".txt", FILE_WRITE);
+      wifi_softap_free_station_info();
+
+      String datum = convertDateToStr(rtc.getTime());
+      myFile2 = SD.open(datum + ".txt", FILE_WRITE);
       if (myFile2)
       {
-        if (novi && ret)
+        if (novi)
         {
           Serial.print(br_korisnika);
           Serial.println(". student is in range.");
@@ -231,7 +232,7 @@ void client_status()
           { 
             Serial.print(br_korisnika);
             Serial.println(". student is out of range.");
-            myFile2.println(line_mac + "|" + convertToStr(rtc.GetDateTime()) + "|0");
+            myFile2.println(line_mac + "|" + convertToStr(rtc.getTime()) + "|0");
             prijavljeni[br_korisnika-1] = "/";
           }
         }
@@ -239,7 +240,7 @@ void client_status()
       }         
       else
       {
-        Serial.println("error opening " + date + ".txt");
+        Serial.println("error opening " + datum + ".txt");
       }
       br_korisnika++;
 
@@ -254,33 +255,33 @@ void client_status()
   delay(500);
 }
 
-String convertToStr(const RtcDateTime& dt)
+String convertToStr(const Time &tm)
 {
-    char datestring[21];
-    String datum;
+  char datestring[21];
+  String datum;
 
-    snprintf_P(datestring, 
-            countof(datestring),
-            PSTR("%04u-%02u-%02uT%02u:%02u"),
-            dt.Year(),
-            dt.Month(),
-            dt.Day(),
-            dt.Hour(),
-            dt.Minute());
-    datum = datestring;
-    return datum;
+  snprintf_P(datestring, 
+          countof(datestring),
+          PSTR("%04u-%02u-%02uT%02u:%02u"),
+          tm.year,
+          tm.mon,
+          tm.date,
+          tm.hour,
+          tm.min);
+  datum = datestring;
+  return datum;
 }
 
-String convertDateToStr(const RtcDateTime& dt)
+String convertDateToStr(const Time &tm)
 {
   char datestring[11];
-    String datum;
+  String datum;
 
-    snprintf_P(datestring, 
-            countof(datestring),
-            PSTR("%02u_%02u"),
-            dt.Day(),
-            dt.Month());
-    datum = datestring;
-    return datestring;
+  snprintf_P(datestring, 
+          countof(datestring),
+          PSTR("%02u_%02u"),
+          tm.date,
+          tm.mon);
+  datum = datestring;
+  return datestring;
 }
