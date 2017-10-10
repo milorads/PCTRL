@@ -18,16 +18,17 @@ extern "C"
 
 #define countof(a) (sizeof(a) / sizeof(a[0]))
 #define MAX 5
-#define MAX_BAFER_OUT 5
 #define MAX_BAFER_COMPARE 50
 #define MAX_RANGE 50
 // Delay of loop function in milli seconds
 # define __delay__ 10
 // Delay of channel changing in seconds
 # define __dlay_ChannelChange__ 0.5
+# define __serverPeriod__ 120
+# define __regCheck__ 5
 
 //Ticker for channel hopping
-Ticker ts;
+Ticker tm;
 
 //Promiscuous callback structures for storing package data, see Espressif SDK handbook
 struct RxControl 
@@ -83,9 +84,6 @@ struct sniffer_buf2
 
 const char* ssid = "Proba";
 
-//mac promenljiva
-//unsigned char mac[6];
-
 const char *webPage = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
 const char *err_msg1 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"red\"> Greska pri unosu </font> \r\n<br><br><br></html> \n";
 const char *err_msg2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Uspesan unos!! </font> \r\n<br><br><br></html> \n";
@@ -109,11 +107,12 @@ int reg_num = 0;
 
 String all_in_range[MAX_RANGE];
 
-String bafer_out[MAX_BAFER_OUT];
-int bafer_out_num = 0;
-
 String bafer_compare[MAX_BAFER_COMPARE];
 int bafer_compare_num = 0;
+
+char mode_flag = 0;
+char registration_flag = 0;
+char timer_cnt = 0;
 
 //Set pins:  CE, IO,CLK
 DS1302 rtc(0, 4, 5);
@@ -121,6 +120,7 @@ DS1302 rtc(0, 4, 5);
 void handleRoot()
 {
   server.send(200, "text/html", webPage);
+  registration_flag++;
 }
 
 void handleData()
@@ -165,12 +165,26 @@ void handleData()
     wifi_softap_free_station_info();
     r[reg_num].mac = mac2str(stat_info->bssid, 0);
     r[reg_num].prisutan = false;
+
+    myFile = SD.open("reg.txt", FILE_WRITE);
+    if (myFile)
+    {
+      myFile.println(r[reg_num].mac + "|" + r[reg_num].ime + "|" + r[reg_num].prezime + "|" + r[reg_num].id);
+      myFile.close();
+    }
+    else
+    {
+      Serial.println("error opening reg.txt");
+    }
+    
     reg_num++;
     Serial.println("Upis zavrsen");
     server.send(200, "text/html", err_msg2);
-  }  
+  } 
+  registration_flag = (registration_flag)?(registration_flag - 1):0; 
 }
 
+//callback funkcija sniffera - poziva se nakon primljenog paketa
 void promisc_cb(uint8_t *buf, uint16_t len)
 {
   uint8_t* buffi;
@@ -208,13 +222,81 @@ void promisc_cb(uint8_t *buf, uint16_t len)
   }
 }
 
-// Change the WiFi channel
+//callback funkcija tajmera, tu se proverava u kom je 
+//stanju masina stanja kada tajmer generise callback fju
 void channelCh(void) 
 { 
-  // Change the channels by modulo operation
-  uint8 new_channel = wifi_get_channel()%12 + 1; 
-  //Serial.printf("** Hop to %d **\n", new_channel); 
-  wifi_set_channel(new_channel); 
+  //server mode period od 2 minuta je istekao, provera da li su svi zavrsili sa registrovanjem
+  if (mode_flag == 0)
+  { 
+    //ako je neko pokrenuo registraciju, tajmer ce na svakih 5 sekundi proveravati da li su zavrsene sve registracije
+    //to ce raditi 60 puta (5 min) posle cegaa ce progrlasiti timeout i preci u sniffer mode
+
+    //ovaj flag ce biti veci od nule ako je neko ucitao formu za prijavljivanje,
+    //a nije submitovao
+    //u tom slucaju prelazi u gore opisano stanje provere
+    if(registration_flag)
+    {
+      tm.detach();
+      tm.attach(__regCheck__, channelCh);
+      mode_flag = 1;        
+    }
+    //ako jeste, prelazi se u sniffing mode
+    else
+    {
+      mode_flag = 2;
+      tm.detach();
+      tm.attach(__dlay_ChannelChange__, channelCh);
+      
+      //setovanje espa da radi kao sniffer
+      wifi_set_opmode(STATION_MODE);
+      wifi_promiscuous_enable(1);
+      Serial.println("Prelazi se sa Server na Sniffer mode");
+    } 
+  }
+  else if (mode_flag == 1)
+  {
+    //ako neko nije zavrsio registraciju, produzava se period u kome esp radi kao server dok se to 
+    //sve ne zavrsi 
+    timer_cnt++;
+    Serial.println("gotova registracija?" + timer_cnt);
+    if((timer_cnt == 60) || (registration_flag == 0))
+    {
+      timer_cnt = 0;
+      mode_flag = 2;
+      tm.detach();
+      tm.attach(__dlay_ChannelChange__, channelCh);
+
+      //setovanje espa da radi kao sniffer
+      wifi_set_opmode(STATION_MODE);
+      wifi_promiscuous_enable(1);
+      Serial.println("Prelazi se sa Server na Sniffer mode");
+    }
+  }
+  else
+  //sniffing mode,u 36 sekundi proverava sve kanale
+  // *TO DO: pokupiti te adrese u neku kolekciju podataka 
+  {
+    // Change the channels by modulo operation
+    uint8 new_channel = wifi_get_channel()%12 + 1;
+     
+    Serial.printf("** Hop to %d **\n", new_channel); 
+    wifi_set_channel(new_channel);
+    timer_cnt ++;
+    
+    if(timer_cnt == 72)
+    {
+      timer_cnt = 0;
+      mode_flag = 0;
+      tm.detach();         
+      tm.attach(__serverPeriod__, channelCh);
+      
+      //setovanje esp-a kao server
+      wifi_promiscuous_enable(0);
+      wifi_set_opmode(SOFTAP_MODE);
+      Serial.println("Prelazi se sa Sniffer na Server mode");
+    }
+  }
 } 
 
 void setup(void)
@@ -228,6 +310,18 @@ void setup(void)
   Serial.print("IP address: ");
   Serial.println(WiFi.softAPIP());
 
+  //po difoltu radi kao server
+  Serial.println("AP mode");
+  wifi_set_opmode(SOFTAP_MODE);
+  mode_flag = 1;
+
+  //Set the promiscuous related options
+  wifi_promiscuous_enable(0);
+  wifi_set_promiscuous_rx_cb(promisc_cb);
+  Serial.printf("Setup done!");
+  tm.attach(__serverPeriod__, channelCh);
+
+  //konfiguracija softAP moda
   struct softap_config config;
   wifi_softap_get_config(&config); // Get config first.
   config.max_connection = 30; // how many stations can connect to ESP8266 softAP at most.
@@ -249,21 +343,6 @@ void setup(void)
     return;
   }
 
-  for (int i = 0; i < MAX_RANGE; all_in_range[i++] = "/");
-  
-  // Set the clock to run-mode, and disable the write protection
-  rtc.halt(false);
-  rtc.writeProtect(true);
-}
- 
-void loop(void)
-{
-  server.handleClient();
-  client_status();
-}
-
-void client_status()
-{
   if (!reg_num)
   {
     myFile = SD.open("reg.txt");
@@ -277,6 +356,7 @@ void client_status()
         r[reg_num].id = myFile.readStringUntil('\n');
         reg_num++;
       }
+      myFile.close();
     }
     else
     {
@@ -284,6 +364,24 @@ void client_status()
     }
   }
 
+  for (int i = 0; i < MAX_RANGE; all_in_range[i++] = "/");
+  
+  // Set the clock to run-mode, and enable the write protection
+  rtc.halt(false);
+  rtc.writeProtect(true);
+}
+ 
+void loop(void)
+{
+  if(mode_flag != 2)
+  {
+    server.handleClient();
+    client_status();       
+  }
+}
+
+void client_status()
+{
   for (int br_korisnika = 1; br_korisnika <= reg_num; br_korisnika++)
   {
     boolean prisutan = false;
@@ -310,41 +408,41 @@ void client_status()
 
     if (novi)
     {
-      Serial.print(br_korisnika);
-      Serial.println(". student is in range.");
-      bafer_out[bafer_out_num] = r[br_korisnika-1].ime + "|" + r[br_korisnika-1].vreme + "|1";
-      bafer_out_num++;
+      String datum = convertDateToStr(rtc.getTime());
+      
+      myFile2 = SD.open(datum + ".txt", FILE_WRITE);
+      if (myFile2)
+      {
+        Serial.print(br_korisnika);
+        Serial.println(". student is in range.");
+        myFile2.println(r[br_korisnika-1].ime + "|" + r[br_korisnika-1].vreme + "|1");
+        myFile2.close();
+      }         
+      else
+      {
+        Serial.println("error opening " + datum + ".txt");
+      }
     }
     else if (!prisutan)
     {
       if (r[br_korisnika-1].prisutan)
       { 
-        Serial.print(br_korisnika);
-        Serial.println(". student is out of range.");
-        bafer_out[bafer_out_num] = r[br_korisnika-1].ime + "|" + t + "|0";
-        bafer_out_num++;
-        r[br_korisnika-1].prisutan = false;
+        String datum = convertDateToStr(rtc.getTime());
+        
+        myFile2 = SD.open(datum + ".txt", FILE_WRITE);
+        if (myFile2)
+        {
+          Serial.print(br_korisnika);
+          Serial.println(". student is out of range.");
+          myFile2.println(r[br_korisnika-1].ime + "|" + t + "|0");
+          myFile2.close();
+          r[br_korisnika-1].prisutan = false;
+        }         
+        else
+        {
+          Serial.println("error opening " + datum + ".txt");
+        }
       }
-    }
-  }
-
-  if (bafer_out_num == MAX_BAFER_OUT)
-  {
-    String datum = convertDateToStr(rtc.getTime());
-  
-    myFile2 = SD.open(datum + ".txt", FILE_WRITE);
-    if (myFile2)
-    {
-      while (bafer_out_num)
-      {
-        myFile2.println(bafer_out[MAX_BAFER_OUT-bafer_out_num]);
-        bafer_out_num--;
-      }
-      myFile2.close();
-    }         
-    else
-    {
-      Serial.println("error opening " + datum + ".txt");
     }
   }
 
@@ -393,4 +491,3 @@ String mac2str(uint8_t *buf, uint8 i)
           buf[i+5]);
   return datestring;
 }
-
