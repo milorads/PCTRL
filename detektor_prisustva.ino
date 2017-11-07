@@ -5,89 +5,84 @@
 #include <ESP8266WebServer.h>
 #include <Ticker.h>
 
+//dns server
+#include <DNSServer.h>
 extern "C" 
 {
-  #include "user_interface.h"
-  #include "ets_sys.h"
-  #include "osapi.h"
-  #include "gpio.h"
-  #include "os_type.h"
-  #include "mem.h"
-  #include "user_config.h"
+    #include "user_interface.h"
+    #include "ets_sys.h"
+    #include "osapi.h"
+    #include "gpio.h"
+    #include "os_type.h"
+    #include "mem.h"
+    #include "user_config.h"
 }
+#define countof(a) (sizeof(a)/sizeof(a[0]))
+#define MAX 30
+#define MAX_BAFER_COMPARE 3500
+#define MAX_CONN_NUM 30
 
-#define countof(a) (sizeof(a) / sizeof(a[0]))
-#define MAX 5
-#define MAX_BAFER_COMPARE 50
-#define MAX_RANGE 50
+#define ITERATION_NUM 10
 // Delay of loop function in milli seconds
 # define __delay__ 10
 // Delay of channel changing in seconds
 # define __dlay_ChannelChange__ 0.5
-# define __serverPeriod__ 120
+# define __serverPeriod__ 60
 # define __regCheck__ 5
-
 //Ticker for channel hopping
 Ticker tm;
-
 //Promiscuous callback structures for storing package data, see Espressif SDK handbook
 struct RxControl 
 {
-  signed rssi:8;
-  unsigned rate:4;
-  unsigned is_group:1;
-  unsigned:1;
-  unsigned sig_mode:2;
-  unsigned legacy_length:12;
-  unsigned damatch0:1;
-  unsigned damatch1:1;
-  unsigned bssidmatch0:1;
-  unsigned bssidmatch1:1;
-  unsigned MCS:7;
-  unsigned CWB:1;
-  unsigned HT_length:16;
-  unsigned Smoothing:1;
-  unsigned Not_Sounding:1;
-  unsigned:1;
-  unsigned Aggregation:1;
-  unsigned STBC:2;
-  unsigned FEC_CODING:1;
-  unsigned SGI:1;
-  unsigned rxend_state:8;
-  unsigned ampdu_cnt:8;
-  unsigned channel:4;
-  unsigned:12;
+    signed rssi: 1;
+    unsigned rate:4;
+    unsigned is_group:1;
+    unsigned:1;
+    unsigned sig_mode:2;
+    unsigned legacy_length:12;
+    unsigned damatch0:1;
+    unsigned damatch1:1;
+    unsigned bssidmatch0:1;
+    unsigned bssidmatch1:1;
+    unsigned MCS:7;
+    unsigned CWB:1;
+    unsigned HT_length:16;
+    unsigned Smoothing:1;
+    unsigned Not_Sounding:1;
+    unsigned:1;
+    unsigned Aggregation:1;
+    unsigned STBC:2;
+    unsigned FEC_CODING:1;
+    unsigned SGI:1;
+    unsigned rxend_state:8;
+    unsigned ampdu_cnt:8;
+    unsigned channel:4;
+    unsigned:12;
 };
-
 struct LenSeq 
 {
-  uint16_t length;
-  uint16_t seq;
-  uint8_t  address3[6];
+    uint16_t length;
+    uint16_t seq;
+    uint8_t  address3[6];
 };
-
 struct sniffer_buf 
 {
-  struct RxControl rx_ctrl;
-  uint8_t buf[36];
-  uint16_t cnt;
-  struct LenSeq lenseq[1];
+    struct RxControl rx_ctrl;
+    uint8_t buf[36];
+    uint16_t cnt;
+    struct LenSeq lenseq[1];
 };
-
 struct sniffer_buf2
 {
-  struct RxControl rx_ctrl;
-  uint8_t buf[112];
-  uint16_t cnt;
-  uint16_t len;
+    struct RxControl rx_ctrl;
+    uint8_t buf[112];
+    uint16_t cnt;
+    uint16_t len;
 };
-
-const char* ssid = "Proba";
-
-const char *webPage = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
+const char* ssid     = "Proba";
+const char *webPage  = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
 const char *err_msg1 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"red\"> Greska pri unosu </font> \r\n<br><br><br></html> \n";
 const char *err_msg2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Uspesan unos!! </font> \r\n<br><br><br></html> \n";
-
 ESP8266WebServer server(80);
 
 File myFile;
@@ -95,399 +90,479 @@ File myFile2;
 
 struct registrovani
 {
-  String mac;
-  String ime;
-  String prezime;
-  String id;
-  String vreme;
-  bool prisutan;
+    uint8_t mac[6];
+    String ime;
+    String prezime;
+    String id;
+    String vreme;
+    uint8 odsutan;
+    
 };
+struct registration_semaphore
+{
+    IPAddress address;
+    bool flag;
+};
+
+registration_semaphore reg_semaphore_arr[MAX_CONN_NUM];
 registrovani r[MAX];
+uint8 semaphore_num = 0;
 int reg_num = 0;
+int seq_counter = 0;
+uint8 direction_flag = 1;
+struct bafer_compare_struct
+{
+    uint8_t mac[6];
+};
 
-String all_in_range[MAX_RANGE];
 
-String bafer_compare[MAX_BAFER_COMPARE];
+bafer_compare_struct bafer_compare[MAX_BAFER_COMPARE];
 int bafer_compare_num = 0;
-
-char mode_flag = 0;
-char registration_flag = 0;
-char timer_cnt = 0;
-
+char mode_flag         = 0;
+bool registration_flag = false;
+char timer_cnt         = 0;
+char counter           = 0;
 //Set pins:  CE, IO,CLK
 DS1302 rtc(0, 4, 5);
 
+//dns seerver
+const byte DNS_PORT = 53;
+IPAddress apIP(192, 168, 4, 1);
+DNSServer dnsServer;
+
+
 void handleRoot()
 {
-  server.send(200, "text/html", webPage);
-  registration_flag++;
-}
+  bool flg = true;
 
+  for(int i = 0;i<semaphore_num;i++)
+  {
+    if(reg_semaphore_arr[i].address == server.client().remoteIP())
+    {reg_semaphore_arr[i].flag = true;
+    flg = false;
+    Serial.print("true ");
+    Serial.println(i); }
+  }
+  if(flg)
+  {
+    reg_semaphore_arr[semaphore_num].flag = true;
+    reg_semaphore_arr[semaphore_num].address = server.client().remoteIP();
+    semaphore_num++;
+        Serial.print("true prvi ");
+        Serial.println(semaphore_num); 
+  }
+  server.send(200, "text/html", webPage);
+}
 void handleData()
 {
-  bool err_flag = false;
-  
-  if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
-  {
-    err_flag = true;
-  }
-
-  //provera flega za greske
-  if (err_flag)
-  {
-    server.send(200, "text/html", err_msg1);
-  }
-  else
-  {
-    r[reg_num].ime = server.arg("polje_ime");
-    r[reg_num].prezime = server.arg("polje_prezime");
-    r[reg_num].id = server.arg("polje_id");
-
-    struct station_info *stat_info;
-    stat_info = wifi_softap_get_station_info();
-
-    struct ip_addr *IPaddress;
-    IPAddress address;
-
-    while (stat_info != NULL)
+    bool err_flag = false;
+    if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
     {
-      IPaddress = &stat_info->ip;
-      address = IPaddress->addr;
-
-      if (address == server.client().remoteIP())
-      {
-        break;
-      }
-      
-      stat_info = STAILQ_NEXT(stat_info, next);
+        err_flag = true;
     }
-
-    wifi_softap_free_station_info();
-    r[reg_num].mac = mac2str(stat_info->bssid, 0);
-    r[reg_num].prisutan = false;
-
-    myFile = SD.open("reg.txt", FILE_WRITE);
-    if (myFile)
+    //provera flega za greske
+    if (err_flag)
     {
-      myFile.println(r[reg_num].mac + "|" + r[reg_num].ime + "|" + r[reg_num].prezime + "|" + r[reg_num].id);
-      myFile.close();
+        server.send(200, "text/html", err_msg1);
     }
     else
     {
-      Serial.println("error opening reg.txt");
-    }
-    
-    reg_num++;
-    Serial.println("Upis zavrsen");
-    server.send(200, "text/html", err_msg2);
-  } 
-  registration_flag = (registration_flag)?(registration_flag - 1):0; 
+        r[reg_num].ime     = server.arg("polje_ime");
+        r[reg_num].prezime = server.arg("polje_prezime");
+        r[reg_num].id      = server.arg("polje_id");
+        struct station_info *stat_info;
+        stat_info = wifi_softap_get_station_info();
+        struct ip_addr *IPaddress;
+        IPAddress address;
+        while (stat_info != NULL)
+        {
+            IPaddress = &stat_info->ip;
+            address   = IPaddress->addr;
+            if (address == server.client().remoteIP())
+            {   
+                for(int i = 0;i<semaphore_num;i++)
+                {
+                  if(reg_semaphore_arr[i].address == server.client().remoteIP())
+                  {reg_semaphore_arr[i].flag = false; 
+                  Serial.print("false ");
+                  Serial.println(i);}
+                }          
+                break;
+            }
+            stat_info = STAILQ_NEXT(stat_info, next);
+        }
+        wifi_softap_free_station_info();
+        r[reg_num].mac[0]   = stat_info->bssid[0];
+        r[reg_num].mac[1]   = stat_info->bssid[1];
+        r[reg_num].mac[2]   = stat_info->bssid[2];
+        r[reg_num].mac[3]   = stat_info->bssid[3];
+        r[reg_num].mac[4]   = stat_info->bssid[4];
+        r[reg_num].mac[5]   = stat_info->bssid[5];
+        r[reg_num].odsutan = false;
+        myFile = SD.open("reg.txt", FILE_WRITE);
+        if (myFile)
+        {
+            String mac_str = mac2str(r[reg_num].mac, 0);
+            myFile.println(mac_str + "|" + r[reg_num].ime + "|" + r[reg_num].prezime + "|" + r[reg_num].id);
+            myFile.close();
+        }
+        else
+        {
+            Serial.println("error opening reg.txt");
+        }
+        reg_num++;
+        Serial.println("Upis zavrsen");
+        server.send(200, "text/html", err_msg2);
+    } 
 }
-
 //callback funkcija sniffera - poziva se nakon primljenog paketa
 void promisc_cb(uint8_t *buf, uint16_t len)
 {
-  uint8_t* buffi;
-  
-  if (len == 12)
-  {
-    return; // Nothing to do for this package, see Espressif SDK documentation.
-  }
-  else if (len == 128) 
-  {
-    struct sniffer_buf2 *sniffer = (struct sniffer_buf2*)buf;
-    buffi = sniffer->buf;
-  } 
-  else 
-  {
-    struct sniffer_buf *sniffer = (struct sniffer_buf*)buf;
-    buffi = sniffer->buf;
-  }
-   
-  String mac_str = mac2str(buffi, 4);
-                   
-  for (int i = 0; i < MAX_RANGE; i++)
-  {
-    if (mac_str == all_in_range[i])
+    uint8_t* buffi;
+    if (len == 12)
     {
-      break;
+        return; // Nothing to do for this package, see Espressif SDK documentation.
     }
-    else if (all_in_range[i] == "/" && mac_str != "ff:ff:ff:ff:ff:ff")
+    else if (len == 128) 
     {
-      all_in_range[i] = mac_str;
-      bafer_compare[bafer_compare_num] = mac_str;
+        struct sniffer_buf2 *sniffer = (struct sniffer_buf2*) buf;
+        buffi = sniffer->buf;
+    } 
+    else 
+    {
+        struct sniffer_buf *sniffer = (struct sniffer_buf*) buf;
+        buffi = sniffer->buf;
+    }
+    if (bafer_compare_num == MAX_BAFER_COMPARE)
+    {
+        return;
+    }
+    if(!(buffi[10] == 0xFF && buffi[11] == 0xFF && buffi[12] == 0xFF && buffi[13] == 0xFF && buffi[14] == 0xFF && buffi[15] == 0xFF))
+    {
+      if(bafer_compare_num && !(buffi[10] == bafer_compare[bafer_compare_num - 1].mac[1] && buffi[11] == bafer_compare[bafer_compare_num - 1].mac[2] && buffi[12] == bafer_compare[bafer_compare_num - 1].mac[3] && buffi[13] == bafer_compare[bafer_compare_num - 1].mac[3] && buffi[14] == bafer_compare[bafer_compare_num - 1].mac[4] && buffi[15] == bafer_compare[bafer_compare_num - 1].mac[5]))
+      {
+        for(int i =0;i<6;i++)
+        bafer_compare[bafer_compare_num].mac[i]  = buffi[10 + i];       
+      }
       bafer_compare_num++;
-      break;
     }
-  }
 }
-
 //callback funkcija tajmera, tu se proverava u kom je 
 //stanju masina stanja kada tajmer generise callback fju
 void channelCh(void) 
 { 
-  //server mode period od 2 minuta je istekao, provera da li su svi zavrsili sa registrovanjem
-  if (mode_flag == 0)
-  { 
-    //ako je neko pokrenuo registraciju, tajmer ce na svakih 5 sekundi proveravati da li su zavrsene sve registracije
-    //to ce raditi 60 puta (5 min) posle cegaa ce progrlasiti timeout i preci u sniffer mode
+    //server mode period od 2 minuta je istekao, provera da li su svi zavrsili sa registrovanjem
+    if (!mode_flag)
+    { 
+        //ako je neko pokrenuo registraciju, tajmer ce na svakih 5 sekundi proveravati da li su zavrsene sve registracije
+        //to ce raditi 60 puta (5 min) posle cegaa ce progrlasiti timeout i preci u sniffer mode
+        //ovaj flag ce biti veci od nule ako je neko ucitao formu za prijavljivanje,
+        //a nije submitovao
+        //u tom slucaju prelazi u gore opisano stanje provere
+        /*if(registration_flag)
+        {
+            tm.detach();
+            tm.attach(__regCheck__, channelCh);
+            mode_flag = 1;        
+        }*/
+        //ako jeste, prelazi se u sniffing mode
+        //else
+        //{
+            bool check = false;
+            for(int i=0;i < semaphore_num; i++)
+            {
+              if(reg_semaphore_arr[i].flag == true){check = true;
+              Serial.println("AA");}
+            }
+            if(check)
+            {
+                seq_counter++;
+                if(seq_counter == 3)
+                {
+                  Serial.println("isteklo je produzeno vreme za registraciju!!");
+                  seq_counter = 0;
+                  check = false;
+                }
+                else
+                {
+                  Serial.println("Produzava se server na jos 2 minuta"); 
+                }
+                             
+            }
+            if(!check)
+            {
+                for(int i = 0;i<semaphore_num;i++)
+                {
+                  reg_semaphore_arr[i].flag = false;
+                  reg_semaphore_arr[i].address = IPAddress();
+                }
+                semaphore_num = 0;
+                mode_flag = 1;
+                tm.detach();
+                bafer_compare_num = 0;
+                tm.attach(__dlay_ChannelChange__, channelCh);
+                //setovanje espa da radi kao sniffer
+                wifi_set_opmode(STATION_MODE);
+                wifi_promiscuous_enable(1);
+                bafer_compare_num = 0;
+                Serial.println("Prelazi se sa Server na Sniffer mode");             
+            }
 
-    //ovaj flag ce biti veci od nule ako je neko ucitao formu za prijavljivanje,
-    //a nije submitovao
-    //u tom slucaju prelazi u gore opisano stanje provere
-    if(registration_flag)
-    {
-      tm.detach();
-      tm.attach(__regCheck__, channelCh);
-      mode_flag = 1;        
+        
     }
-    //ako jeste, prelazi se u sniffing mode
     else
+    //sniffing mode,u 36 sekundi proverava sve kanale
+    // *TO DO: pokupiti te adrese u neku kolekciju podataka 
     {
-      mode_flag = 2;
-      tm.detach();
-      tm.attach(__dlay_ChannelChange__, channelCh);
-      
-      //setovanje espa da radi kao sniffer
-      wifi_set_opmode(STATION_MODE);
-      wifi_promiscuous_enable(1);
-      Serial.println("Prelazi se sa Server na Sniffer mode");
-    } 
-  }
-  else if (mode_flag == 1)
-  {
-    //ako neko nije zavrsio registraciju, produzava se period u kome esp radi kao server dok se to 
-    //sve ne zavrsi 
-    timer_cnt++;
-    Serial.println("gotova registracija?" + timer_cnt);
-    if((timer_cnt == 60) || (registration_flag == 0))
-    {
-      timer_cnt = 0;
-      mode_flag = 2;
-      tm.detach();
-      tm.attach(__dlay_ChannelChange__, channelCh);
-
-      //setovanje espa da radi kao sniffer
-      wifi_set_opmode(STATION_MODE);
-      wifi_promiscuous_enable(1);
-      Serial.println("Prelazi se sa Server na Sniffer mode");
+        // Change the channels by modulo operation
+        uint8 new_channel = (direction_flag)?(wifi_get_channel() + 1):(wifi_get_channel() - 1);
+        if(direction_flag)
+        {
+          new_channel = wifi_get_channel() + 1;
+          if(new_channel == 12)
+            direction_flag = 0;
+        }
+        else
+        { 
+          new_channel = wifi_get_channel() - 1;
+          if(new_channel == 1)
+            direction_flag = 1;
+        }
+        wifi_set_channel(new_channel);
+        timer_cnt ++;
+        if(timer_cnt == 96)
+        {
+            timer_cnt = 0;
+            
+            tm.detach();
+            counter = 0;
+            
+            //setovanje esp-a kao server
+            wifi_promiscuous_enable(0);
+              Serial.println("zavrseno snifovanje!");
+              mode_flag = 0;
+              wifi_set_opmode(SOFTAP_MODE);
+              Serial.println("Prelazi se sa Sniffer na Server mode");
+              Serial.print("Broj kuraca u baferu: ");
+              Serial.println(bafer_compare_num);
+              tm.attach(__serverPeriod__, channelCh);
+              client_status();            
+              bafer_compare_num = 0;
+        }
     }
-  }
-  else
-  //sniffing mode,u 36 sekundi proverava sve kanale
-  // *TO DO: pokupiti te adrese u neku kolekciju podataka 
-  {
-    // Change the channels by modulo operation
-    uint8 new_channel = wifi_get_channel()%12 + 1;
-     
-    Serial.printf("** Hop to %d **\n", new_channel); 
-    wifi_set_channel(new_channel);
-    timer_cnt ++;
     
-    if(timer_cnt == 72)
-    {
-      timer_cnt = 0;
-      mode_flag = 0;
-      tm.detach();         
-      tm.attach(__serverPeriod__, channelCh);
-      
-      //setovanje esp-a kao server
-      wifi_promiscuous_enable(0);
-      wifi_set_opmode(SOFTAP_MODE);
-      Serial.println("Prelazi se sa Sniffer na Server mode");
-    }
-  }
 } 
-
 void setup(void)
 {  
-  delay(1000);
-  Serial.begin(115200);
-  Serial.println();
-  Serial.print("Configuring access point...");
-  WiFi.softAP(ssid);
-  Serial.println("");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.softAPIP());
+    delay(1000);
+    Serial.begin(115200);
+    Serial.println();
+    Serial.print("Configuring access point...");
+    
+    
+    WiFi.softAP(ssid);
+    //WiFi.hostname
+    Serial.println("");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.softAPIP());
 
-  //po difoltu radi kao server
-  Serial.println("AP mode");
-  wifi_set_opmode(SOFTAP_MODE);
-  mode_flag = 1;
+    //dns config
+     dnsServer.setTTL(300);
+     dnsServer.setErrorReplyCode(DNSReplyCode::ServerFailure);
+     dnsServer.start(DNS_PORT, "prijavi.me", apIP); 
+    server.onNotFound([]() {
+    String message = "Hello World!\n\n";
+    message += "URI: ";
+    message += server.uri();
 
-  //Set the promiscuous related options
-  wifi_promiscuous_enable(0);
-  wifi_set_promiscuous_rx_cb(promisc_cb);
-  Serial.printf("Setup done!");
-  tm.attach(__serverPeriod__, channelCh);
-
-  //konfiguracija softAP moda
-  struct softap_config config;
-  wifi_softap_get_config(&config); // Get config first.
-  config.max_connection = 30; // how many stations can connect to ESP8266 softAP at most.
-  wifi_softap_set_config(&config);// Set ESP8266 softap config
-
-  server.on("/", handleRoot);
-  server.on("/metoda1", handleData);
-  server.begin();
-  Serial.println("HTTP server started");
-
-  //SD Card Initialization
-  if (SD.begin(SS))
-  {
-    Serial.println("SD card is ready to use.");
-  }
-  else
-  {
-    Serial.println("SD card initialization failed.");
-    return;
-  }
-
-  if (!reg_num)
-  {
-    myFile = SD.open("reg.txt");
-    if (myFile)
+    server.send(200, "text/plain", message);
+  });
+    //kraj dns-a
+    
+    //po difoltu radi kao server
+    Serial.println("AP mode");
+    wifi_set_opmode(SOFTAP_MODE);
+    //Set the promiscuous related options
+    wifi_promiscuous_enable(0);
+    wifi_set_promiscuous_rx_cb(promisc_cb);
+    Serial.printf("Setup done!");
+    tm.attach(__serverPeriod__, channelCh);
+    //konfiguracija softAP moda
+    struct softap_config config;
+    wifi_softap_get_config(&config); // Get config first.
+    config.max_connection = MAX_CONN_NUM; // how many stations can connect to ESP8266 softAP at most.
+    wifi_softap_set_config(&config);// Set ESP8266 softap config
+    server.on("/", handleRoot);
+    server.on("/metoda1", handleData);
+    server.begin();
+    Serial.println("HTTP server started");
+    //SD Card Initialization
+    if (SD.begin(SS))
     {
-      while (myFile.available())
-      {
-        r[reg_num].mac = myFile.readStringUntil('|');
-        r[reg_num].ime = myFile.readStringUntil('|');
-        r[reg_num].prezime = myFile.readStringUntil('|');
-        r[reg_num].id = myFile.readStringUntil('\n');
-        reg_num++;
-      }
-      myFile.close();
+        Serial.println("SD card is ready to use.");
     }
     else
     {
-      Serial.println("error opening reg.txt");
+        Serial.println("SD card initialization failed.");
+        return;
     }
-  }
-
-  for (int i = 0; i < MAX_RANGE; all_in_range[i++] = "/");
-  
-  // Set the clock to run-mode, and enable the write protection
-  rtc.halt(false);
-  rtc.writeProtect(true);
+    if (!reg_num)
+    {
+        myFile = SD.open("reg.txt");
+        if (myFile)
+        {
+            while (myFile.available())
+            {
+                String mac_str     = myFile.readStringUntil(':');
+                r[reg_num].mac[0]  = str2mac(mac_str);
+                mac_str            = myFile.readStringUntil(':');
+                r[reg_num].mac[1]  = str2mac(mac_str);
+                mac_str            = myFile.readStringUntil(':');
+                r[reg_num].mac[2]  = str2mac(mac_str);
+                mac_str            = myFile.readStringUntil(':');
+                r[reg_num].mac[3]  = str2mac(mac_str);
+                mac_str            = myFile.readStringUntil(':');
+                r[reg_num].mac[4]  = str2mac(mac_str);
+                mac_str            = myFile.readStringUntil('|');
+                r[reg_num].mac[5]  = str2mac(mac_str);
+                r[reg_num].ime     = myFile.readStringUntil('|');
+                r[reg_num].prezime = myFile.readStringUntil('|');
+                r[reg_num].id      = myFile.readStringUntil('\n');
+                reg_num++;
+            }
+            myFile.close();
+        }
+        else
+        {
+            Serial.println("error opening reg.txt");
+        }
+    }
+    // Set the clock to run-mode, and enable the write protection
+    rtc.halt(false);
+    rtc.writeProtect(true);
 }
  
 void loop(void)
 {
-  if(mode_flag != 2)
-  {
-    server.handleClient();
-    client_status();       
-  }
-}
+    if(mode_flag)
+    {
+        delay(100);      
+    }
+    else
+    {
+        //dns processing
+        dnsServer.processNextRequest();
 
+        
+        server.handleClient();
+        //client_status(); 
+    }
+}
 void client_status()
 {
-  for (int br_korisnika = 1; br_korisnika <= reg_num; br_korisnika++)
-  {
-    boolean prisutan = false;
-    boolean novi = false;
-  
-    String t = convertToStr(rtc.getTime()); 
-   
-    for (int i = 0; i < bafer_compare_num; i++)
-    { 
-      if (bafer_compare[i] == r[br_korisnika-1].mac)
-      {
-        prisutan = true;
-  
-        if (!r[br_korisnika-1].prisutan)
-        {
-          novi = true; 
-          r[br_korisnika-1].vreme = t;
-          r[br_korisnika-1].prisutan = true;
-        }
-
-        break;
-      }
-    }
-
-    if (novi)
+    for (int br_korisnika = 1; br_korisnika <= reg_num; br_korisnika++)
     {
-      String datum = convertDateToStr(rtc.getTime());
-      
-      myFile2 = SD.open(datum + ".txt", FILE_WRITE);
-      if (myFile2)
-      {
-        Serial.print(br_korisnika);
-        Serial.println(". student is in range.");
-        myFile2.println(r[br_korisnika-1].ime + "|" + r[br_korisnika-1].vreme + "|1");
-        myFile2.close();
-      }         
-      else
-      {
-        Serial.println("error opening " + datum + ".txt");
-      }
-    }
-    else if (!prisutan)
-    {
-      if (r[br_korisnika-1].prisutan)
-      { 
-        String datum = convertDateToStr(rtc.getTime());
-        
-        myFile2 = SD.open(datum + ".txt", FILE_WRITE);
-        if (myFile2)
+        boolean prisutan = false;
+        boolean novi = false;
+        String t = convertToStr(rtc.getTime()); 
+        for (int i = 0; i < bafer_compare_num; i++)
         {
-          Serial.print(br_korisnika);
-          Serial.println(". student is out of range.");
-          myFile2.println(r[br_korisnika-1].ime + "|" + t + "|0");
-          myFile2.close();
-          r[br_korisnika-1].prisutan = false;
-        }         
-        else
-        {
-          Serial.println("error opening " + datum + ".txt");
+            if ((bafer_compare[i].mac[0] == r[br_korisnika-1].mac[0] && bafer_compare[i].mac[1] == r[br_korisnika-1].mac[1] &&
+                 bafer_compare[i].mac[2] == r[br_korisnika-1].mac[2] && bafer_compare[i].mac[3] == r[br_korisnika-1].mac[3] &&
+                 bafer_compare[i].mac[4] == r[br_korisnika-1].mac[4] && bafer_compare[i].mac[5] == r[br_korisnika-1].mac[5]))
+            {
+                prisutan = true;
+                if (!r[br_korisnika-1].odsutan)
+                {
+                    novi = true; 
+                    r[br_korisnika-1].vreme    = t;
+                    r[br_korisnika-1].odsutan++;
+                }
+                else r[br_korisnika-1].odsutan = 1;
+                break;
+            }
         }
-      }
+        if (novi)
+        {
+            String datum = convertDateToStr(rtc.getTime());
+            myFile2 = SD.open(datum + ".txt", FILE_WRITE);
+            if (myFile2)
+            {
+                Serial.println(r[br_korisnika-1].ime + " is in range.");
+                myFile2.println(r[br_korisnika-1].ime + "|" + r[br_korisnika-1].vreme + "|1");
+                myFile2.close();
+            }         
+            else
+            {
+                Serial.println("error opening " + datum + ".txt");
+            }
+        }
+        else if(!prisutan)
+        {
+            if(r[br_korisnika-1].odsutan == 1)
+              r[br_korisnika-1].vreme = t;
+            if(r[br_korisnika-1].odsutan > 0)
+            r[br_korisnika-1].odsutan++;
+            if (r[br_korisnika-1].odsutan == ITERATION_NUM)
+            { 
+                String datum = convertDateToStr(rtc.getTime());
+                myFile2 = SD.open(datum + ".txt", FILE_WRITE);
+                if (myFile2)
+                {
+                    Serial.println(r[br_korisnika-1].ime + " is out of range.");
+                    myFile2.println(r[br_korisnika-1].ime + "|" + r[br_korisnika-1].vreme + "|0");
+                    myFile2.close();
+                    r[br_korisnika-1].odsutan = 0;
+                }         
+                else
+                {
+                    Serial.println("error opening " + datum + ".txt");
+                }
+            }
+        }
     }
-  }
-
-  bafer_compare_num = 0;
 }
-
 String convertToStr(const Time &tm)
 {
-  char datestring[21];
-
-  snprintf_P(datestring, 
-          countof(datestring),
-          PSTR("%04u-%02u-%02uT%02u:%02u"),
-          tm.year,
-          tm.mon,
-          tm.date,
-          tm.hour,
-          tm.min);
-  return datestring;
+    char datestring[21];
+    snprintf_P(datestring, 
+                   countof(datestring),
+                   PSTR("%04u-%02u-%02uT%02u:%02u"),
+                   tm.year,
+                   tm.mon,
+                   tm.date,
+                   tm.hour,
+                   tm.min);
+    return datestring;
 }
-
 String convertDateToStr(const Time &tm)
 {
-  char datestring[11];
-
-  snprintf_P(datestring, 
-          countof(datestring),
-          PSTR("%02u_%02u"),
-          tm.date,
-          tm.mon);
-  return datestring;
+    char datestring[11];
+    snprintf_P(datestring, 
+                   countof(datestring),
+                   PSTR("%02u_%02u"),
+                   tm.date,
+                   tm.mon);
+    return datestring;
 }
-
 String mac2str(uint8_t *buf, uint8 i)
 {
-  char datestring[18];
-
-  snprintf_P(datestring, 
-          countof(datestring),
-          PSTR("%02X:%02X:%02X:%02X:%02X:%02X"),
-          buf[i],
-          buf[i+1],
-          buf[i+2],
-          buf[i+3],
-          buf[i+4],
-          buf[i+5]);
-  return datestring;
+    char datestring[18];
+    snprintf_P(datestring, 
+                   countof(datestring),
+                   PSTR("%02X:%02X:%02X:%02X:%02X:%02X"),
+                   buf[i],
+                   buf[i+1],
+                   buf[i+2],
+                   buf[i+3],
+                   buf[i+4],
+                   buf[i+5]);
+    return datestring;
+}
+uint8_t str2mac(String str)
+{
+    uint8_t mac;
+    mac = (str[0] < 65)? 16*(str[0] - 48) : 16*(str[0] - 55);
+    mac += (str[1] < 65)? str[1] - 48 : str[1] - 55;
+    return mac;
 }
