@@ -1,111 +1,126 @@
 #include <SD.h>
 #include <DS1302.h>
-//#include <Time.h>
-//#include <TimeLib.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266Ping.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
+#include <DNSServer.h>
 
-extern "C" {
-#include<user_interface.h>
+extern "C" 
+{
+  #include<user_interface.h>
 }
 
-#define countof(a) (sizeof(a) / sizeof(a[0]))
-#define MAX 10
+#define countof(a) (sizeof(a)/sizeof(a[0]))
+#define MAX 30
 
-const char* ssid = "Proba";
-
-//mac promenljiva
 unsigned char mac[6];
-
-const char *webPage = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
+const char *ssid     = "Proba";
+const char *webPage  = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
 const char *err_msg1 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"red\"> Greska pri unosu </font> \r\n<br><br><br></html> \n";
 const char *err_msg2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Uspesan unos!! </font> \r\n<br><br><br></html> \n";
-
+const char *err_msg3 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Vec si registrovan, budalice mala! :D </font> \r\n<br><br><br></html> \n";
 ESP8266WebServer server(80);
-
 File myFile;
 File myFile2;
-
-String prijavljeni[MAX];
-
 //Set pins:  CE, IO,CLK
 DS1302 rtc(0, 4, 5);
-
+struct station_info *stat_info;
 struct ip_addr *IPaddress;
 IPAddress address;
+struct registrovani
+{
+  uint8_t mac[6];
+  String ime;
+  String prezime;
+  String id;
+  String vreme;
+  bool prisutan;
+};
+registrovani reg[MAX];
+int reg_num = 0;
+//dns server
+const byte DNS_PORT = 53;
+IPAddress apIP(192, 168, 4, 1);
+DNSServer dnsServer;
 
 void handleRoot()
 {
+  //Deo koda koji zabranjuje ponovnu registraciju
+  for (int i = 0; i < reg_num; i++)
+  {
+    stat_info = wifi_softap_get_station_info();
+    while (stat_info != NULL)
+    {
+      IPaddress = &stat_info->ip;
+      address   = IPaddress->addr;
+      if (address == server.client().remoteIP())
+      {   
+        if (reg[i].mac[0] == stat_info->bssid[0] && reg[i].mac[1] == stat_info->bssid[1] && reg[i].mac[2] == stat_info->bssid[2] &&
+            reg[i].mac[3] == stat_info->bssid[3] && reg[i].mac[4] == stat_info->bssid[4] && reg[i].mac[5] == stat_info->bssid[5])
+        {
+          server.send(200, "text/html", err_msg3);       
+          return;
+        }
+        break;
+      }
+      stat_info = STAILQ_NEXT(stat_info, next);
+    }
+    wifi_softap_free_station_info();
+  }
   server.send(200,"text/html",webPage);
 }
 
 void handleData()
 {
   bool err_flag = false;
-  
   if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
   {
     err_flag = true;
   }
-
   //provera flega za greske
   if (err_flag)
   {
-    server.send(200,"text/html",err_msg1);
+    server.send(200, "text/html", err_msg1);
   }
   else
   {
-    //ocitavanje podataka
-    String par_ime = server.arg("polje_ime");
-    String par_prezime = server.arg("polje_prezime");
-    String par_id = server.arg("polje_id");
-
-    struct station_info *stat_info;
+    reg[reg_num].ime     = server.arg("polje_ime");
+    reg[reg_num].prezime = server.arg("polje_prezime");
+    reg[reg_num].id      = server.arg("polje_id");
     stat_info = wifi_softap_get_station_info();
-
     while (stat_info != NULL)
     {
       IPaddress = &stat_info->ip;
-      address = IPaddress->addr;
-
+      address   = IPaddress->addr;
       if (address == server.client().remoteIP())
-      {
+      {         
         break;
       }
-      
       stat_info = STAILQ_NEXT(stat_info, next);
     }
-    
-    //zapisivanje fizicke adrese
-    mac[0] = stat_info->bssid[0];
-    mac[1] = stat_info->bssid[1];
-    mac[2] = stat_info->bssid[2];
-    mac[3] = stat_info->bssid[3];
-    mac[4] = stat_info->bssid[4];
-    mac[5] = stat_info->bssid[5];
-
+    reg[reg_num].mac[0]   = stat_info->bssid[0];
+    reg[reg_num].mac[1]   = stat_info->bssid[1];
+    reg[reg_num].mac[2]   = stat_info->bssid[2];
+    reg[reg_num].mac[3]   = stat_info->bssid[3];
+    reg[reg_num].mac[4]   = stat_info->bssid[4];
+    reg[reg_num].mac[5]   = stat_info->bssid[5];
     wifi_softap_free_station_info();
-
     myFile = SD.open("reg.txt", FILE_WRITE);
-    if(myFile)
+    if (myFile)
     {
-      String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") +\
-                       String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") +\
-                       String(mac[4], HEX) + String(":") + String(mac[5], HEX);
-      
-      myFile.println(mac_str + "|" + par_ime + "|" + par_prezime + "|" + par_id);
+      String mac_str = mac2str(reg[reg_num].mac, 0);
+      myFile.println(mac_str + "|" + reg[reg_num].ime + "|" + reg[reg_num].prezime + "|" + reg[reg_num].id);
       myFile.close();
-      Serial.println("Upis zavrsen");
     }
     else
     {
-      Serial.println("greska pri otvaranju");
+      Serial.println("error opening reg.txt");
     }
-    
-    server.send(200,"text/html",err_msg2);
-  }  
+    reg_num++;
+    Serial.println("Upis zavrsen");
+    server.send(200, "text/html", err_msg2);
+  } 
 }
 
 void setup(void)
@@ -118,19 +133,25 @@ void setup(void)
   Serial.println("");
   Serial.print("IP address: ");
   Serial.println(WiFi.softAPIP());
-
+  //dns config
+  dnsServer.setTTL(300);
+  dnsServer.setErrorReplyCode(DNSReplyCode::ServerFailure);
+  dnsServer.start(DNS_PORT, "prijavi.me", apIP); 
+  server.onNotFound([](){
+                          String message = "Hello World!\n\n";
+                          message += "URI: ";
+                          message += server.uri();
+                          server.send(200, "text/plain", message);
+                        }
+  );//kraj dns-a
   struct softap_config config;
   wifi_softap_get_config(&config); // Get config first.
-
   config.max_connection = 30; // how many stations can connect to ESP8266 softAP at most.
-
   wifi_softap_set_config(&config);// Set ESP8266 softap config
-
-  server.on("/",handleRoot);
-  server.on("/metoda1",handleData);
+  server.on("/", handleRoot);
+  server.on("/metoda1", handleData);
   server.begin();
   Serial.println("HTTP server started");
-
   //SD Card Initialization
   if (SD.begin(SS))
   {
@@ -141,147 +162,156 @@ void setup(void)
     Serial.println("SD card initialization failed.");
     return;
   }
-
-  for (int i = 0; i < MAX; prijavljeni[i++] = "/");
-  
-  // Set the clock to run-mode, and disable the write protection
+  if (!reg_num)
+  {
+    myFile = SD.open("reg.txt");
+    if (myFile)
+    {
+      while (myFile.available())
+      {
+        String mac_str       = myFile.readStringUntil(':');
+        reg[reg_num].mac[0]  = str2mac(mac_str);
+        mac_str              = myFile.readStringUntil(':');
+        reg[reg_num].mac[1]  = str2mac(mac_str);
+        mac_str              = myFile.readStringUntil(':');
+        reg[reg_num].mac[2]  = str2mac(mac_str);
+        mac_str              = myFile.readStringUntil(':');
+        reg[reg_num].mac[3]  = str2mac(mac_str);
+        mac_str              = myFile.readStringUntil(':');
+        reg[reg_num].mac[4]  = str2mac(mac_str);
+        mac_str              = myFile.readStringUntil('|');
+        reg[reg_num].mac[5]  = str2mac(mac_str);
+        reg[reg_num].ime     = myFile.readStringUntil('|');
+        reg[reg_num].prezime = myFile.readStringUntil('|');
+        reg[reg_num].id      = myFile.readStringUntil('\n');
+        reg_num++;
+      }
+      myFile.close();
+    }
+    else
+    {
+      Serial.println("error opening reg.txt");
+    }
+  }
+  // Set the clock to run-mode, and enable the write protection
   rtc.halt(false);
   rtc.writeProtect(true);
 }
  
 void loop(void)
 {
+  //dns processing
+  dnsServer.processNextRequest();
   server.handleClient();
-  delay(5000);
   client_status();
-  delay(500);
 }
 
 void client_status()
 {
-  myFile = SD.open("reg.txt");
-  if (myFile)
+  for (int i = 0; i <= reg_num; i++)
   {
-    int br_korisnika = 1;
-    
-    while (myFile.available()) 
+    boolean prisutan = false;
+    boolean novi     = false;
+    String t = convertToStr(rtc.getTime()); 
+    stat_info = wifi_softap_get_station_info();
+    while (stat_info != NULL)
     {
-      //wifi_softap_free_station_info();
-      struct station_info *stat_info;
-      stat_info = wifi_softap_get_station_info();
-      
-      boolean prisutan = false;
-      boolean novi = false;
-
-      String t = convertToStr(rtc.getTime());   
-      String line_mac = myFile.readStringUntil('|');
-
-      bool ret;
-     
-      while (stat_info != NULL)
+      if ((stat_info->bssid[0] == reg[i].mac[0] && stat_info->bssid[1] == reg[i].mac[1] &&
+           stat_info->bssid[2] == reg[i].mac[2] && stat_info->bssid[3] == reg[i].mac[3] &&
+           stat_info->bssid[4] == reg[i].mac[4] && stat_info->bssid[5] == reg[i].mac[5]))
       {
-        mac[0] = stat_info->bssid[0];
-        mac[1] = stat_info->bssid[1];
-        mac[2] = stat_info->bssid[2];
-        mac[3] = stat_info->bssid[3];
-        mac[4] = stat_info->bssid[4];
-        mac[5] = stat_info->bssid[5];
-
-        IPaddress = &stat_info->ip;
-        address = IPaddress->addr;
-
-        String mac_str = String(mac[0], HEX) + String(":") + String(mac[1], HEX) + String(":") +\
-                         String(mac[2], HEX) + String(":") + String(mac[3], HEX) + String(":") +\
-                         String(mac[4], HEX) + String(":") + String(mac[5], HEX);
-        
-        if (mac_str == line_mac)
+        prisutan = true;
+        if (!reg[i].prisutan)
         {
-          Serial.print("Free heap:");
-          Serial.println(ESP.getFreeHeap());
-          
-          ret = Ping.ping(address);
-          
-          prisutan = true;
-
-          if (prijavljeni[br_korisnika-1] == "/" && ret)
-          {
-            novi = true;
-            
-            prijavljeni[br_korisnika-1] = line_mac + "|" + t + "|1";
-          }
+          novi = true; 
+          reg[i].vreme   = t;
+          reg[i].prisutan = true;
         }
-        
-        stat_info = STAILQ_NEXT(stat_info, next); 
+        break;
       }
-
-      wifi_softap_free_station_info();
-
+      stat_info = STAILQ_NEXT(stat_info, next);
+    }
+    wifi_softap_free_station_info();
+    if (novi)
+    {
       String datum = convertDateToStr(rtc.getTime());
       myFile2 = SD.open(datum + ".txt", FILE_WRITE);
       if (myFile2)
       {
-        if (novi)
-        {
-          Serial.print(br_korisnika);
-          Serial.println(". student is in range.");
-          myFile2.println(prijavljeni[br_korisnika-1]);
-        }
-        else if (!prisutan || !ret)
-        {
-          if (prijavljeni[br_korisnika-1] != "/")
-          { 
-            Serial.print(br_korisnika);
-            Serial.println(". student is out of range.");
-            myFile2.println(line_mac + "|" + convertToStr(rtc.getTime()) + "|0");
-            prijavljeni[br_korisnika-1] = "/";
-          }
-        }
+        Serial.println(reg[i].ime + " is in range.");
+        myFile2.println(reg[i].ime + "|" + reg[i].vreme + "|1");
         myFile2.close();
       }         
       else
       {
         Serial.println("error opening " + datum + ".txt");
       }
-      br_korisnika++;
-
-      line_mac = myFile.readStringUntil('\n');
     }
-    myFile.close();
+    else if(!prisutan)
+    {
+      if (reg[i].prisutan)
+      { 
+        String datum = convertDateToStr(rtc.getTime());
+        myFile2 = SD.open(datum + ".txt", FILE_WRITE);
+        if (myFile2)
+        {
+          Serial.println(reg[i].ime + " is out of range.");
+          myFile2.println(reg[i].ime + "|" + t + "|0");
+          myFile2.close();
+          reg[i].prisutan = false;
+        }         
+        else
+        {
+          Serial.println("error opening " + datum + ".txt");
+        }
+      }
+    }
   }
-  else
-  {
-    Serial.println("error opening reg.txt");
-  }
-  delay(500);
 }
 
 String convertToStr(const Time &tm)
 {
   char datestring[21];
-  String datum;
-
   snprintf_P(datestring, 
-          countof(datestring),
-          PSTR("%04u-%02u-%02uT%02u:%02u"),
-          tm.year,
-          tm.mon,
-          tm.date,
-          tm.hour,
-          tm.min);
-  datum = datestring;
-  return datum;
+             countof(datestring),
+             PSTR("%04u-%02u-%02uT%02u:%02u"),
+             tm.year,
+             tm.mon,
+             tm.date,
+             tm.hour,
+             tm.min);
+  return datestring;
 }
 
 String convertDateToStr(const Time &tm)
 {
   char datestring[11];
-  String datum;
-
   snprintf_P(datestring, 
-          countof(datestring),
-          PSTR("%02u_%02u"),
-          tm.date,
-          tm.mon);
-  datum = datestring;
+             countof(datestring),
+             PSTR("%02u_%02u"),
+             tm.date,
+             tm.mon);
   return datestring;
+}
+
+String mac2str(uint8_t *buf, uint8 i)
+{
+  char datestring[18];
+  snprintf_P(datestring, 
+             countof(datestring),
+             PSTR("%02X:%02X:%02X:%02X:%02X:%02X"),
+             buf[i],
+             buf[i+1],
+             buf[i+2],
+             buf[i+3],
+             buf[i+4],
+             buf[i+5]);
+  return datestring;
+  }
+
+uint8_t str2mac(String str)
+{
+  uint8_t mac = (str[0] < 65) ? 16*(str[0] - 48) : 16*(str[0] - 55);
+  mac += (str[1] < 65) ? str[1] - 48 : str[1] - 55;
+  return mac;
 }
