@@ -5,15 +5,18 @@
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 //#include <DNSServer.h>
+
 extern "C" 
 {
   #include<user_interface.h>
 }
+
 #define countof(a) (sizeof(a)/sizeof(a[0]))
 #define MAX 30
-//unsigned char mac[6];
+
 const char *ssid     = "ProbaBoban";
 const char *webPage  = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
+const char *webPage2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda3\">\r\n <br>User:<input type=\"text\" name=\"polje_user\" required = \"required\"><br> <br>Password:<input type=\"password\" name=\"polje_password\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
 const char *err_msg1 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"red\"> Greska pri unosu </font> \r\n<br><br><br></html> \n";
 const char *err_msg2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Uspesan unos!! </font> \r\n<br><br><br></html> \n";
 const char *err_msg3 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Vec si registrovan, budalice mala! :D </font> \r\n<br><br><br></html> \n";
@@ -40,9 +43,9 @@ int reg_num = 0;
 /* const byte DNS_PORT = 53;
 IPAddress apIP(192, 168, 4, 1);
 DNSServer dnsServer; */
+
 void handleRoot()
 {
-
   /***************************/
   /*loging*/
   logFile = SD.open("loging.txt",FILE_WRITE);
@@ -84,7 +87,7 @@ void handleRoot()
     }
     wifi_softap_free_station_info();
   }
-    /*...........................*/
+  /*...........................*/
   /*logovanje*/
   if(logFile)
   {
@@ -92,28 +95,29 @@ void handleRoot()
     logFile.close();
   }
   /*...........................*/
-  
-  
   server.send(200,"text/html",webPage);
+}
+
+void adminPage()
+{
+	server.send(200, "text/html", webPage2);
 }
 
 void handleData()
 {
-    /*********************************/
-    /*logovanje*/
-    logFile = SD.open("loging.txt",FILE_WRITE);
-    if(logFile)
-    {
-      logFile.println("**POCETAK FUNKCIJE HANDLE DATA**");
-    }
-    /********************************/
-    
+	/*********************************/
+	/*logovanje*/
+	logFile = SD.open("loging.txt",FILE_WRITE);
+	if(logFile)
+	{
+		logFile.println("**POCETAK FUNKCIJE HANDLE DATA**");
+	}
+	/********************************/  
   bool err_flag = false;
   if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
   {
     logFile.println("GRESKA: neka od pollja su prazna!!");
-    err_flag = true;
-    
+    err_flag = true;  
   }
   //provera flega za greske
   if (err_flag)
@@ -123,14 +127,11 @@ void handleData()
   else
   {
     logFile.println("sva polja su uneta, prenos u kolekciju promenljivih");
-    
     reg[reg_num].ime     = server.arg("polje_ime");
     reg[reg_num].prezime = server.arg("polje_prezime");
     reg[reg_num].id      = server.arg("polje_id");
     stat_info = wifi_softap_get_station_info();
-    
-    logFile.println("pocetak prolaska kroz listu stat_info");
-    
+    logFile.println("pocetak prolaska kroz listu stat_info"); 
     while (stat_info != NULL)
     {
       IPaddress = &stat_info->ip;
@@ -141,29 +142,22 @@ void handleData()
       }
       stat_info = STAILQ_NEXT(stat_info, next);
     }
-
     logFile.println("dealociranje liste station_info");
-    logFile.println("upisivanje mac adrese u kolekciju registrovanih");
-    
-    reg[reg_num].mac[0]   = stat_info->bssid[0];
-    reg[reg_num].mac[1]   = stat_info->bssid[1];
-    reg[reg_num].mac[2]   = stat_info->bssid[2];
-    reg[reg_num].mac[3]   = stat_info->bssid[3];
-    reg[reg_num].mac[4]   = stat_info->bssid[4];
-    reg[reg_num].mac[5]   = stat_info->bssid[5];
+    logFile.println("upisivanje mac adrese u kolekciju registrovanih"); 
+    reg[reg_num].mac[0] = stat_info->bssid[0];
+    reg[reg_num].mac[1] = stat_info->bssid[1];
+    reg[reg_num].mac[2] = stat_info->bssid[2];
+    reg[reg_num].mac[3] = stat_info->bssid[3];
+    reg[reg_num].mac[4] = stat_info->bssid[4];
+    reg[reg_num].mac[5] = stat_info->bssid[5];
     wifi_softap_free_station_info();
-
     logFile.println("pocetak upisa podataka na sd karticu");
-    logFile.close();
-        
-    myFile = SD.open("reg.txt", FILE_WRITE);
-    
+    logFile.close();       
     String mac_str = mac2str(reg[reg_num].mac, 0);
     String reg_kor = mac_str + "|" + reg[reg_num].ime + "|" + reg[reg_num].prezime + "|" + reg[reg_num].id;
-
+		myFile = SD.open("reg.txt", FILE_WRITE);
     if (myFile)
-    {
-      
+    {  
       myFile.println(reg_kor);
       myFile.close();
     }
@@ -173,8 +167,8 @@ void handleData()
     }
     logFile = SD.open("loging.txt",FILE_WRITE);
     reg_num++;
-        Serial.print(reg_num);
-    Serial.println(". registrovani korisnik: " + reg_kor);
+		logFile.print(reg_num);
+    logFile.println(". registrovani korisnik: " + reg_kor);
     server.send(200, "text/html", err_msg2);
 
     logFile.println("poslata stranica za uspesno prijavljivanje");
@@ -182,6 +176,27 @@ void handleData()
     logFile.close();
   } 
 }
+
+void adminData()
+{
+  String evidencija;
+  String datum = convertDateToStr(rtc.getTime());
+  myFile2 = SD.open(datum + ".txt");
+	if (myFile2)
+  {
+    while (myFile2.available())
+    {
+			evidencija += myFile2.readStringUntil('\n');
+    }
+    myFile.close();
+  }
+  else
+  {
+    Serial.println("error opening " + datum + ".txt");
+  }
+	server.send(200, "text/plain", evidencija);
+}
+
 void setup(void)
 {  
   delay(1000);
@@ -209,6 +224,8 @@ void setup(void)
   wifi_softap_set_config(&config);// Set ESP8266 softap config
   server.on("/", handleRoot);
   server.on("/metoda1", handleData);
+	server.on("/metoda2", adminPage);
+  server.on("/metoda3", adminData);
   server.begin();
   Serial.println("HTTP server started");
   //SD Card Initialization
@@ -221,20 +238,20 @@ void setup(void)
     Serial.println("SD card initialization failed.");
     return;
   }
-      /***************************/
-    /*loging*/
-    logFile = SD.open("loging.txt",FILE_WRITE);
-    if(logFile)
-    {
-      logFile.println("Serial monitor initialized");
-      logFile.println("SD card  initialized");
-      logFile.println("soft AP config started");
-      logFile.println("Pocetak ucaitavanja podataka sa kartice");
-      logFile.println("soft AP config finished succesfully");
-      logFile.println("HTTP server started");
-      logFile.close();      
-    }
-    /***************************/
+	/***************************/
+	/*loging*/
+	logFile = SD.open("loging.txt",FILE_WRITE);
+	if(logFile)
+	{
+		logFile.println("Serial monitor initialized");
+		logFile.println("SD card  initialized");
+		logFile.println("soft AP config started");
+		logFile.println("Pocetak ucaitavanja podataka sa kartice");
+		logFile.println("soft AP config finished succesfully");
+		logFile.println("HTTP server started");
+		logFile.close();      
+	}
+	/***************************/
   if (!reg_num)
   {
     myFile = SD.open("reg.txt");
@@ -266,7 +283,7 @@ void setup(void)
       Serial.println("error opening reg.txt");
     }
   }
-    /*loging*/
+  /*loging*/
   logFile = SD.open("loging.txt",FILE_WRITE);
   if(logFile)
   {
@@ -288,6 +305,7 @@ void loop(void)
   server.handleClient();
   client_status();
 }
+
 void client_status()
 {
   for (int i = 0; i <= reg_num; i++)
@@ -305,8 +323,8 @@ void client_status()
         if (reg[i].vreme_ulaska == "")
         {
           reg[i].vreme_ulaska = t;
-          logFile=SD.open("loging.txt",FILE_WRITE);
-          logFile.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + "is in range");
+          logFile = SD.open("loging.txt",FILE_WRITE);
+          logFile.println(reg[i].ime + " " + reg[i].prezime + " is in range, time: " + reg[i].vreme_ulaska);
           logFile.close();
           Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + "is in range");
         }
@@ -324,10 +342,10 @@ void client_status()
         if (myFile2)
         {
           Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + "is out of range");
-          myFile2.println(reg[i].ime + "|" + reg[i].prezime + reg[i].id+ "|" + reg[i].vreme_ulaska + "|" + t);
+          myFile2.println(reg[i].ime + "|" + reg[i].prezime + "|" + reg[i].id+ "|" + reg[i].vreme_ulaska + "|" + t);
           myFile2.close();
-          logFile=SD.open("loging.txt",FILE_WRITE);
-          logFile.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + "out of range");
+          logFile=SD.open("loging.txt", FILE_WRITE);
+          logFile.println(reg[i].ime + " " + reg[i].prezime + " is out of range, time: " + t);
           logFile.close();
           reg[i].vreme_ulaska = "";
         }         
@@ -339,6 +357,7 @@ void client_status()
     }
   }
 }
+
 String convertToStr(const Time &tm)
 {
   char datestring[21];
@@ -352,6 +371,7 @@ String convertToStr(const Time &tm)
              tm.min);
   return datestring;
 }
+
 String convertDateToStr(const Time &tm)
 {
   char datestring[11];
@@ -362,6 +382,7 @@ String convertDateToStr(const Time &tm)
              tm.mon);
   return datestring;
 }
+
 String mac2str(uint8_t *buf, uint8 i)
 {
   char datestring[18];
@@ -376,10 +397,10 @@ String mac2str(uint8_t *buf, uint8 i)
              buf[i+5]);
   return datestring;
   }
+	
 uint8_t str2mac(String str)
 {
   uint8_t mac = (str[0] < 65) ? 16*(str[0] - 48) : 16*(str[0] - 55);
   mac += (str[1] < 65) ? str[1] - 48 : str[1] - 55;
   return mac;
 }
-
