@@ -116,7 +116,7 @@ void handleData()
   bool err_flag = false;
   if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
   {
-    logFile.println("GRESKA: neka od pollja su prazna!!");
+    logFile.println("GRESKA: neka od polja su prazna!!");
     err_flag = true;  
   }
   //provera flega za greske
@@ -130,6 +130,19 @@ void handleData()
     reg[reg_num].ime     = server.arg("polje_ime");
     reg[reg_num].prezime = server.arg("polje_prezime");
     reg[reg_num].id      = server.arg("polje_id");
+    /* reg[reg_num].ime.replace("š", "&#353;");
+    reg[reg_num].ime.replace("Š", "&#352;");
+    reg[reg_num].ime.replace("ž", "&#382;");
+    reg[reg_num].ime.replace("Ž", "&#381;"); */
+    reg[reg_num].ime.replace("|", "");
+    /* reg[reg_num].prezime.replace("š", "&#353;");
+    reg[reg_num].prezime.replace("Š", "&#352;");
+    reg[reg_num].prezime.replace("ž", "&#382;");
+    reg[reg_num].prezime.replace("Ž", "&#381;"); */
+    reg[reg_num].prezime.replace("|", "");
+    reg[reg_num].id.replace("\n", "");
+    reg[reg_num].id.replace("\r", "");
+    reg[reg_num].id.replace("|", "");
     stat_info = wifi_softap_get_station_info();
     logFile.println("pocetak prolaska kroz listu stat_info"); 
     while (stat_info != NULL)
@@ -187,6 +200,7 @@ void adminData()
     while (myFile2.available())
     {
 			evidencija += myFile2.readStringUntil('\n');
+      evidencija += "<br>";
     }
     myFile.close();
   }
@@ -194,7 +208,8 @@ void adminData()
   {
     Serial.println("error opening " + datum + ".txt");
   }
-	server.send(200, "text/plain", evidencija);
+  // Serial.println(evidencija);
+	server.send(200, "text/html", evidencija);
 }
 
 void setup(void)
@@ -274,6 +289,8 @@ void setup(void)
         reg[reg_num].ime     = myFile.readStringUntil('|');
         reg[reg_num].prezime = myFile.readStringUntil('|');
         reg[reg_num].id      = myFile.readStringUntil('\n');
+        reg[reg_num].id.replace("\n", "");
+        reg[reg_num].id.replace("\r", "");
         reg_num++;
       }
       myFile.close();
@@ -326,7 +343,7 @@ void client_status()
           logFile = SD.open("loging.txt",FILE_WRITE);
           logFile.println(reg[i].ime + " " + reg[i].prezime + " is in range, time: " + reg[i].vreme_ulaska);
           logFile.close();
-          Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + "is in range");
+          Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + " is in range");
         }
         break;
       }
@@ -341,7 +358,7 @@ void client_status()
         myFile2 = SD.open(datum + ".txt", FILE_WRITE);
         if (myFile2)
         {
-          Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + "is out of range");
+          Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + " is out of range");
           myFile2.println(reg[i].ime + "|" + reg[i].prezime + "|" + reg[i].id+ "|" + reg[i].vreme_ulaska + "|" + t);
           myFile2.close();
           logFile=SD.open("loging.txt", FILE_WRITE);
