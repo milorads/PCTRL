@@ -135,6 +135,29 @@ namespace wifiConnectionTest
             //write to excel
         }
 
+        public static bool ApiTests()
+        {
+            try
+            {
+                var url = "http://192.168.4.1/apitest";
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);//
+                request.Method = "Get";
+                request.Timeout = 8; // aggresive timeout, to be checked if it's possible when too many connections are served
+                HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+                myResponse = "";
+                using (System.IO.StreamReader sr = new System.IO.StreamReader(response.GetResponseStream()))
+                {
+                    myResponse = sr.ReadToEnd();
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                // we got timeout
+                return false;
+            }
+        }
+
         public static void MakeRequest()
         {
             var url = "http://192.168.4.1/metoda3?polje_user=a&polje_password=a";
