@@ -25,7 +25,7 @@ File myFile;
 File myFile2;
 File logFile;
 //Set pins:  CE, IO,CLK
-DS1302 rtc(0, 4, 5);
+DS1302 rtc(0, 2, 5);
 struct station_info *stat_info;
 struct ip_addr *IPaddress;
 IPAddress address;
@@ -130,15 +130,7 @@ void handleData()
     reg[reg_num].ime     = server.arg("polje_ime");
     reg[reg_num].prezime = server.arg("polje_prezime");
     reg[reg_num].id      = server.arg("polje_id");
-    /* reg[reg_num].ime.replace("š", "&#353;");
-    reg[reg_num].ime.replace("Š", "&#352;");
-    reg[reg_num].ime.replace("ž", "&#382;");
-    reg[reg_num].ime.replace("Ž", "&#381;"); */
     reg[reg_num].ime.replace("|", "");
-    /* reg[reg_num].prezime.replace("š", "&#353;");
-    reg[reg_num].prezime.replace("Š", "&#352;");
-    reg[reg_num].prezime.replace("ž", "&#382;");
-    reg[reg_num].prezime.replace("Ž", "&#381;"); */
     reg[reg_num].prezime.replace("|", "");
     reg[reg_num].id.replace("\n", "");
     reg[reg_num].id.replace("\r", "");
@@ -197,19 +189,19 @@ void adminData()
   myFile2 = SD.open(datum + ".txt");
 	if (myFile2)
   {
-    while (myFile2.available())
-    {
-			evidencija += myFile2.readStringUntil('\n');
-      evidencija += "<br>";
-    }
+    //while (myFile2.available())
+    //{
+			evidencija = myFile2.readStringUntil('\0');
+      //evidencija += "<br>";
+    //}
     myFile.close();
   }
   else
   {
     Serial.println("error opening " + datum + ".txt");
   }
-  // Serial.println(evidencija);
-	server.send(200, "text/html", evidencija);
+  //Serial.println(evidencija);
+	server.send(200, "text/plain", evidencija);
 }
 
 void setup(void)
@@ -358,6 +350,44 @@ void client_status()
         myFile2 = SD.open(datum + ".txt", FILE_WRITE);
         if (myFile2)
         {
+          for (int idx = 0; idx < reg[i].ime.length(); idx++)
+          {
+            uint8_t c = reg[i].ime[idx];
+            switch (c)
+            {
+              case 0x9A:
+                reg[i].ime.replace(String(reg[i].ime[idx]), "&#353;");
+                break;
+              case 0x9E:
+                reg[i].ime.replace(String(reg[i].ime[idx]), "&#382;");
+                break;
+              case 0x8A:
+                reg[i].ime.replace(String(reg[i].ime[idx]), "&#352;");
+                break;
+              case 0x8E:
+                reg[i].ime.replace(String(reg[i].ime[idx]), "&#381;");
+                break;
+            } 
+          }
+          for (int idx = 0; idx < reg[i].prezime.length(); idx++)
+          {
+            uint8_t c = reg[i].prezime[idx];
+            switch (c)
+            {
+              case 0x9A:
+                reg[i].prezime.replace(String(reg[i].prezime[idx]), "&#353;");
+                break;
+              case 0x9E:
+                reg[i].prezime.replace(String(reg[i].prezime[idx]), "&#382;");
+                break;
+              case 0x8A:
+                reg[i].prezime.replace(String(reg[i].prezime[idx]), "&#352;");
+                break;
+              case 0x8E:
+                reg[i].prezime.replace(String(reg[i].prezime[idx]), "&#381;");
+                break;
+            } 
+          }
           Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + " is out of range");
           myFile2.println(reg[i].ime + "|" + reg[i].prezime + "|" + reg[i].id+ "|" + reg[i].vreme_ulaska + "|" + t);
           myFile2.close();
@@ -394,9 +424,10 @@ String convertDateToStr(const Time &tm)
   char datestring[11];
   snprintf_P(datestring, 
              countof(datestring),
-             PSTR("%02u_%02u"),
+             PSTR("%02u_%02u_%02u"),
              tm.date,
-             tm.mon);
+             tm.mon,
+             tm.year - 2000);
   return datestring;
 }
 
@@ -413,7 +444,7 @@ String mac2str(uint8_t *buf, uint8 i)
              buf[i+4],
              buf[i+5]);
   return datestring;
-  }
+}
 	
 uint8_t str2mac(String str)
 {
