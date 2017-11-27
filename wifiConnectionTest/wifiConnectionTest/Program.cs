@@ -41,17 +41,31 @@ namespace wifiConnectionTest
             xlWorkSheet.Cells[1, 3] = "Prezime";
             xlWorkSheet.Cells[1, 4] = "Ulaz";
             xlWorkSheet.Cells[1, 5] = "Izlaz";
+            xlWorkSheet.Cells[1, 6] = "Zadržavanje(u minutima)";
             int i = 2;
             foreach (var obj in objectList)
             {
                 xlWorkSheet.Cells[i, 1] = obj.Id;
                 xlWorkSheet.Cells[i, 2] = obj.Ime;
                 xlWorkSheet.Cells[i, 3] = obj.Prezime;
-                xlWorkSheet.Cells[i, 4] = obj.Ulaz.ToString("yyyy-MM-ddTHH:mm");
-                xlWorkSheet.Cells[i++, 5] = obj.Izlaz.ToString("yyyy-MM-ddTHH:mm");
+                xlWorkSheet.Cells[i, 4] = obj.Ulaz.ToOADate();
+                xlWorkSheet.Cells[i, 5] = obj.Izlaz.ToOADate();
+                DateTime startTime = obj.Ulaz;
+                DateTime endTime = obj.Izlaz;
+                xlWorkSheet.Cells[i++, 6] = endTime.Subtract(startTime).Minutes;
             }
 
-            xlWorkBook.SaveAs(Directory.GetCurrentDirectory()+"\\filename.xls",
+            Microsoft.Office.Interop.Excel.Range ulazRange = xlWorkSheet.get_Range("D:D");
+            ulazRange.NumberFormat = "DD/MM/YYYY HH:mm";
+            Marshal.FinalReleaseComObject(ulazRange);
+            Microsoft.Office.Interop.Excel.Range izlazRange = xlWorkSheet.get_Range("E:E");
+            izlazRange.NumberFormat = "DD/MM/YYYY HH:mm";
+            Marshal.FinalReleaseComObject(izlazRange);
+
+            // we will have full data report - all the data
+            // concatenated all the presences of same person into length of his presence for the day
+            // same as above but only calculating the class time which is input
+            xlWorkBook.SaveAs(Directory.GetCurrentDirectory()+$"\\FullDataReport_DD-MM-YY-{ShortId.GetBase36(5)}.xls",
                 Microsoft.Office.Interop.Excel.XlFileFormat.xlWorkbookNormal, misValue, misValue, misValue, misValue,
                 Microsoft.Office.Interop.Excel.XlSaveAsAccessMode.xlExclusive, misValue, misValue, misValue, misValue, misValue);
             xlWorkBook.Close(true, misValue, misValue);
@@ -85,9 +99,12 @@ namespace wifiConnectionTest
             objectList = new List<Presence>();
             foreach (string line in presenceList)
             {
-                var splitLine = line.Split('|');
-                Presence currPresence = new Presence(splitLine[0],splitLine[1],splitLine[2], DateTime.ParseExact(splitLine[3], "yyyy-MM-ddTHH:mm",null), DateTime.ParseExact(splitLine[4], "yyyy-MM-ddTHH:mm", null));
-                objectList.Add(currPresence);
+                if (!string.IsNullOrEmpty(line))
+                {
+                    var splitLine = line.Split('|');
+                    Presence currPresence = new Presence(System.Web.HttpUtility.HtmlDecode(splitLine[0]), System.Web.HttpUtility.HtmlDecode(splitLine[1]), splitLine[2], DateTime.ParseExact(splitLine[3], "yyyy-MM-ddTHH:mm", null), DateTime.ParseExact(splitLine[4], "yyyy-MM-ddTHH:mm", null));
+                    objectList.Add(currPresence);
+                }
             }
             //foreach (var line in presenceList)
             //{
@@ -120,19 +137,21 @@ namespace wifiConnectionTest
 
         public static void MakeRequest()
         {
-            //var url = "http://192.168.4.1/metoda3?polje_pass=wefwe&polje_user=evwv";
-            var url = "https://jsonplaceholder.typicode.com/posts/1";
+            var url = "http://192.168.4.1/metoda3?polje_user=a&polje_password=a";
+            //var url = "https://jsonplaceholder.typicode.com/posts/1";
             string html = string.Empty;
 
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);//
             request.Method = "Get";
+            //request.ContentType =  "text/html; charset=utf-8";
             //request.KeepAlive = true;
             //request.Timeout = 60;
             ////request.ContentType = "text/plain";
-            ////request.Headers.Add("Content-Type", "text/plain");
+            //request.Headers.Add("Content-Type", "text/plain");
             //request.ContentType = "application/x-www-form-urlencoded";
 
             HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+            //response.ContentType = "text/html; charset=utf-8";
             myResponse = "";
             using (System.IO.StreamReader sr = new System.IO.StreamReader(response.GetResponseStream()))
             {
