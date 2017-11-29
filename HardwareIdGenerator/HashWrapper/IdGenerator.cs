@@ -34,7 +34,7 @@ namespace IdGenerator
             var shortFileName = GenerateShortFilenameId();
             id = GenerateId();
             hashedId = GetHashedId(id);
-            return GenerateQrCode(hashedId, shortFileName);
+            return GenerateQrCode(hashedId, id+"_"+hashedId);
         }
     }
 }

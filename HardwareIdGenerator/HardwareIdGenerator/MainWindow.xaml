@@ -5,11 +5,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:HardwareIdGenerator"
         mc:Ignorable="d"
-        Title="MainWindow" Height="350" Width="525">
+        Title="MainWindow" Height="400" Width="300">
     <Grid>
         <Button Content="Generate" HorizontalAlignment="Left" Margin="10,10,0,0" VerticalAlignment="Top" Width="75" Click="Button_Click"/>
-        <Image x:Name="QrSlika" HorizontalAlignment="Left" Height="301" Margin="208,10,0,0" VerticalAlignment="Top" Width="300"/>
-        <Label x:Name="IdHashed" Content="Label" HorizontalAlignment="Left" Margin="10,50,0,0" VerticalAlignment="Top" RenderTransformOrigin="0.512,0.658"/>
+        <Image x:Name="QrSlika" HorizontalAlignment="Left" Height="264" Margin="10,96,0,0" VerticalAlignment="Top" Width="263"/>
+        <Label x:Name="IdHashed" Content="No Hash ID" HorizontalAlignment="Left" Margin="15,34,0,0" VerticalAlignment="Top" RenderTransformOrigin="4.017,-0.297"/>
+        <Label x:Name="IdNonHashed" Content="ID" HorizontalAlignment="Left" Margin="15,65,0,0" VerticalAlignment="Top"/>
+        <Button Content="Scan" HorizontalAlignment="Left" Margin="90,10,0,0" VerticalAlignment="Top" Width="75" Click="Button_Click_1"/>
 
     </Grid>
 </Window>
