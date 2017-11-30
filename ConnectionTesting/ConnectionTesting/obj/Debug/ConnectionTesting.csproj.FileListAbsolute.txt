@@ -1,0 +1,6 @@
+D:\Program Files\jeti\PCTRL\ConnectionTesting\ConnectionTesting\obj\Debug\ConnectionTesting.csprojResolveAssemblyReference.cache
+D:\Program Files\jeti\PCTRL\ConnectionTesting\ConnectionTesting\obj\Debug\ConnectionTesting.csproj.CoreCompileInputs.cache
+D:\Program Files\jeti\PCTRL\ConnectionTesting\ConnectionTesting\bin\Debug\ConnectionTesting.exe
+D:\Program Files\jeti\PCTRL\ConnectionTesting\ConnectionTesting\bin\Debug\ConnectionTesting.pdb
+D:\Program Files\jeti\PCTRL\ConnectionTesting\ConnectionTesting\obj\Debug\ConnectionTesting.exe
+D:\Program Files\jeti\PCTRL\ConnectionTesting\ConnectionTesting\obj\Debug\ConnectionTesting.pdb
