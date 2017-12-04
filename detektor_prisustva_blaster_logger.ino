@@ -4,6 +4,8 @@
 #include <ESP8266Ping.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
+#include <SPI.h>
+#include "MD5.h"
 //#include <DNSServer.h>
 
 extern "C" 
@@ -12,20 +14,25 @@ extern "C"
 }
 
 #define countof(a) (sizeof(a)/sizeof(a[0]))
-#define MAX 30
+#define MAX 100
 
 const char *ssid     = "ProbaBoban";
-const char *webPage  = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda1\">\r\n <br>Ime:<input type=\"text\" name=\"polje_ime\" required = \"required\"><br> <br>Prezime:<input type=\"text\" name=\"polje_prezime\" required = \"required\"><br> <br>Id:<input type=\"text\" name=\"polje_id\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
-const char *webPage2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/metoda3\">\r\n <br>User:<input type=\"text\" name=\"polje_user\" required = \"required\"><br> <br>Password:<input type=\"password\" name=\"polje_password\" required = \"required\"><br> <button type=\"submit\">Continue</button>  </form>\r\n<br><br><br></html> \n";
-const char *err_msg1 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"red\"> Greska pri unosu </font> \r\n<br><br><br></html> \n";
-const char *err_msg2 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Uspesan unos!! </font> \r\n<br><br><br></html> \n";
-const char *err_msg3 = "Content-Type: text/html\r\n\r\n <!DOCTYPE HTML>\r\n <head> </head><html>\r\n <font color=\"green\"> Vec si registrovan, budalice mala! :D </font> \r\n<br><br><br></html> \n";
+const char *webPage  = "<!DOCTYPE HTML> <head><title>Registracija</title> </head><html> <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/regData\"><h1>Registracija</h1><table><tr><td>Ime:</td><td><input type=\"text\" name=\"polje_ime\" required = \"required\"></td></tr> <tr><td>Prezime:</td><td><input type=\"text\" name=\"polje_prezime\" required = \"required\"></td></tr> <tr><td>Id:</td><td><input type=\"text\" name=\"polje_id\" required = \"required\"></td></tr> <tr><td><button type=\"submit\">Submit</button></td><td><button type=\"reset\">Reset</button></td></tr>  </form></html>";
+const char *webPage2 = "<!DOCTYPE HTML> <head><title>Admin</title> </head><html> <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/getData\"><h1>Hello admin!</h1><table><tr><td>Code:</td><td><input type=\"text\" name=\"code\" required = \"required\"></td></tr> <tr><td>File name:</td><td><input type=\"text\" name=\"file\" required = \"required\"></td></tr> <tr><td><button type=\"submit\">Continue</button></td><td><button type=\"reset\">Reset</button></td></tr>  </form></html>";
+const char *webPage3 = "<!DOCTYPE HTML> <head><title>Brisanje</title> </head><html> <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/deleteData\"><h1>Brisanje fajla</h1><table><tr><td>Code:</td><td><input type=\"text\" name=\"code\" required = \"required\"></td></tr><tr><td>Datum fajla:</td><td><input type=\"text\" name=\"file\" required = \"required\"></td></tr> <tr><td><button type=\"submit\">Continue</button></td><td><button type=\"reset\">Reset</button></td></tr>  </form></html>";
+const char *webPage4 = "<!DOCTYPE HTML> <head><title>Test</title> </head><html> <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/apiTest\"><h1>Test</h1><table><tr><td>Code:</td><td><input type=\"text\" name=\"code\" required = \"required\"></td></tr> <tr><td><button type=\"submit\">Continue</button></td><td><button type=\"reset\">Reset</button></td></tr>  </form></html>";
+const char *webPage5 = "<!DOCTYPE HTML> <head><title>List</title> </head><html> <form name=\"form1\" id=\"txt_form\" method=\"get\" action=\"/listData\"><h1>List of files</h1><table><tr><td>Code:</td><td><input type=\"text\" name=\"code\" required = \"required\"></td></tr> <tr><td><button type=\"submit\">Continue</button></td><td><button type=\"reset\">Reset</button></td></tr>  </form></html>";
+const char *err_msg1 = "<!DOCTYPE HTML> <head><title>Error</title> </head><html> <font color=\"red\"> Greska pri unosu! </font></html>";
+const char *err_msg2 = "<!DOCTYPE HTML> <head><title>Success</title> </head><html> <font color=\"green\"> Uspesan unos! </font></html>";
+const char *err_msg3 = "<!DOCTYPE HTML> <head><title>Warning</title> </head><html> <font color=\"green\"> Vec si registrovan! </font></html>";
+const char *succ_remove = "<!DOCTYPE HTML> <head><title>Success</title> </head><html> <font color=\"green\"> Uspesno obrisan fajl! </font></html>";
 ESP8266WebServer server(80);
 File myFile;
 File myFile2;
 File logFile;
+File root;
 //Set pins:  CE, IO,CLK
-DS1302 rtc(0, 2, 5);
+DS1302 rtc(0, 4, 5);
 struct station_info *stat_info;
 struct ip_addr *IPaddress;
 IPAddress address;
@@ -39,6 +46,8 @@ struct registrovani
 };
 registrovani reg[MAX];
 int reg_num = 0;
+String salt = "PCTRL";
+String md5 = "164803c7f69b529f116352cc0814084e";
 //dns server
 /* const byte DNS_PORT = 53;
 IPAddress apIP(192, 168, 4, 1);
@@ -56,51 +65,44 @@ void handleRoot()
     logFile.println("Provera da li je vec registrovan");      
   }
   /***************************/
-  //Deo koda koji zabranjuje ponovnu registraciju
-  for (int i = 0; i < reg_num; i++)
+  //F-ja koja zabranjuje ponovnu registraciju
+  bool postoji =  checkRegClient();
+  if (postoji)
   {
-    stat_info = wifi_softap_get_station_info();
-    while (stat_info != NULL)
+    server.send(200, "text/html", err_msg3);
+  }
+  else
+  {
+    /*...........................*/
+    /*logovanje*/
+    if(logFile)
     {
-      IPaddress = &stat_info->ip;
-      address   = IPaddress->addr;
-      if (address == server.client().remoteIP())
-      {   
-        if (reg[i].mac[0] == stat_info->bssid[0] && reg[i].mac[1] == stat_info->bssid[1] && reg[i].mac[2] == stat_info->bssid[2] &&
-            reg[i].mac[3] == stat_info->bssid[3] && reg[i].mac[4] == stat_info->bssid[4] && reg[i].mac[5] == stat_info->bssid[5])
-        {
-          server.send(200, "text/html", err_msg3);
-          /*...........................*/
-          /*logovanje*/
-          if(logFile)
-          {
-            logFile.println("Vec je prijavljen na ovoj mac adresi");
-            logFile.println(reg[i].ime + " " + reg[i].prezime[i] + "|" + String(reg[i].mac[0]) + ":" + String(reg[i].mac[1]) + ":" + String(reg[i].mac[2]) + ":" + String(reg[i].mac[3]) + ":" + String(reg[i].mac[4]) + ":" + String(reg[i].mac[5]) + " je probao ponovo da se uloguje");
-            logFile.close();
-          }
-          /*...........................*/       
-          return;
-        }
-        break;
-      }
-      stat_info = STAILQ_NEXT(stat_info, next);
+      logFile.println("Zahtev za registracijom je regularan, salje se stranica za prijavu");
+      logFile.close();
     }
-    wifi_softap_free_station_info();
+    /*...........................*/
+    server.send(200,"text/html",webPage);
   }
-  /*...........................*/
-  /*logovanje*/
-  if(logFile)
-  {
-    logFile.println("Zahtev za registracijom je regularan, salje se stranica za prijavu");
-    logFile.close();
-  }
-  /*...........................*/
-  server.send(200,"text/html",webPage);
+}
+
+void apiPage()
+{
+  server.send(200, "text/html", webPage4);
 }
 
 void adminPage()
 {
 	server.send(200, "text/html", webPage2);
+}
+
+void deletePage()
+{
+  server.send(200, "text/html", webPage3);
+}
+
+void listPage()
+{
+  server.send(200, "text/html", webPage5);
 }
 
 void handleData()
@@ -113,10 +115,90 @@ void handleData()
 		logFile.println("**POCETAK FUNKCIJE HANDLE DATA**");
 	}
 	/********************************/  
-  bool err_flag = false;
-  if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
+  //F-ja koja zabranjuje ponovnu registraciju
+  bool postoji = checkRegClient();
+  if (postoji)
+  { 
+    server.send(200, "text/html", err_msg3);
+  }
+  else
   {
-    logFile.println("GRESKA: neka od polja su prazna!!");
+    bool err_flag = false;
+    if ((server.arg("polje_ime") == "") || (server.arg("polje_prezime") == "") || (server.arg("polje_id") == ""))
+    {
+      logFile.println("GRESKA: neka od polja su prazna!!");
+      err_flag = true;  
+    }
+    //provera flega za greske
+    if (err_flag)
+    {
+      server.send(200, "text/html", err_msg1);
+    }
+    else
+    {
+      logFile.println("sva polja su uneta, prenos u kolekciju promenljivih");
+      reg[reg_num].ime     = server.arg("polje_ime");
+      reg[reg_num].prezime = server.arg("polje_prezime");
+      reg[reg_num].id      = server.arg("polje_id");
+      reg[reg_num].ime.replace("|", "");
+      reg[reg_num].prezime.replace("|", "");
+      reg[reg_num].id.replace("\n", "");
+      reg[reg_num].id.replace("\r", "");
+      reg[reg_num].id.replace("|", "");
+      stat_info = wifi_softap_get_station_info();
+      logFile.println("pocetak prolaska kroz listu stat_info"); 
+      while (stat_info != NULL)
+      {
+        IPaddress = &stat_info->ip;
+        address   = IPaddress->addr;
+        if (address == server.client().remoteIP())
+        {         
+          break;
+        }
+        stat_info = STAILQ_NEXT(stat_info, next);
+      }
+      logFile.println("dealociranje liste station_info");
+      logFile.println("upisivanje mac adrese u kolekciju registrovanih"); 
+      reg[reg_num].mac[0] = stat_info->bssid[0];
+      reg[reg_num].mac[1] = stat_info->bssid[1];
+      reg[reg_num].mac[2] = stat_info->bssid[2];
+      reg[reg_num].mac[3] = stat_info->bssid[3];
+      reg[reg_num].mac[4] = stat_info->bssid[4];
+      reg[reg_num].mac[5] = stat_info->bssid[5];
+      wifi_softap_free_station_info();
+      logFile.println("pocetak upisa podataka na sd karticu");
+      logFile.close();       
+      String mac_str = mac2str(reg[reg_num].mac, 0);
+      String reg_kor = mac_str + "|" + reg[reg_num].ime + "|" + reg[reg_num].prezime + "|" + reg[reg_num].id;
+      myFile = SD.open("reg.txt", FILE_WRITE);
+      if (myFile)
+      {  
+        myFile.println(reg_kor);
+        myFile.close();
+      }
+      else
+      {
+        Serial.println("error opening reg.txt");
+      }
+      logFile = SD.open("loging.txt",FILE_WRITE);
+      reg_num++;
+      logFile.print(reg_num);
+      logFile.println(". registrovani korisnik: " + reg_kor);
+      server.send(200, "text/html", err_msg2);
+  
+      logFile.println("poslata stranica za uspesno prijavljivanje");
+      logFile.println("**KRAJ FUNKCIJE HANDLE DATA **");
+      logFile.close();
+    } 
+  }
+}
+
+void getData()
+{
+  bool err_flag = false;
+  if ((server.arg("file") == "") || (server.arg("code") == ""))
+  {
+    //logFile.println("GRESKA: neka od polja su prazna!!");
     err_flag = true;  
   }
   //provera flega za greske
@@ -126,82 +208,154 @@ void handleData()
   }
   else
   {
-    logFile.println("sva polja su uneta, prenos u kolekciju promenljivih");
-    reg[reg_num].ime     = server.arg("polje_ime");
-    reg[reg_num].prezime = server.arg("polje_prezime");
-    reg[reg_num].id      = server.arg("polje_id");
-    reg[reg_num].ime.replace("|", "");
-    reg[reg_num].prezime.replace("|", "");
-    reg[reg_num].id.replace("\n", "");
-    reg[reg_num].id.replace("\r", "");
-    reg[reg_num].id.replace("|", "");
-    stat_info = wifi_softap_get_station_info();
-    logFile.println("pocetak prolaska kroz listu stat_info"); 
-    while (stat_info != NULL)
+    String kod = server.arg("code");
+    if (checkCode(kod))
     {
-      IPaddress = &stat_info->ip;
-      address   = IPaddress->addr;
-      if (address == server.client().remoteIP())
-      {         
-        break;
+      String evidencija;
+      String datum = server.arg("file");
+      myFile2 = SD.open(datum + ".txt");
+      if (myFile2)
+      {
+        evidencija = myFile2.readStringUntil('\0');
+        myFile.close();
+        server.send(200, "text/plain", evidencija);
       }
-      stat_info = STAILQ_NEXT(stat_info, next);
-    }
-    logFile.println("dealociranje liste station_info");
-    logFile.println("upisivanje mac adrese u kolekciju registrovanih"); 
-    reg[reg_num].mac[0] = stat_info->bssid[0];
-    reg[reg_num].mac[1] = stat_info->bssid[1];
-    reg[reg_num].mac[2] = stat_info->bssid[2];
-    reg[reg_num].mac[3] = stat_info->bssid[3];
-    reg[reg_num].mac[4] = stat_info->bssid[4];
-    reg[reg_num].mac[5] = stat_info->bssid[5];
-    wifi_softap_free_station_info();
-    logFile.println("pocetak upisa podataka na sd karticu");
-    logFile.close();       
-    String mac_str = mac2str(reg[reg_num].mac, 0);
-    String reg_kor = mac_str + "|" + reg[reg_num].ime + "|" + reg[reg_num].prezime + "|" + reg[reg_num].id;
-		myFile = SD.open("reg.txt", FILE_WRITE);
-    if (myFile)
-    {  
-      myFile.println(reg_kor);
-      myFile.close();
+      else
+      {
+        Serial.println("error opening " + datum + ".txt");
+        server.send(200, "text/html", err_msg1);
+      }
     }
     else
     {
-      Serial.println("error opening reg.txt");
+      server.send(200, "text/html", err_msg1);
     }
-    logFile = SD.open("loging.txt",FILE_WRITE);
-    reg_num++;
-		logFile.print(reg_num);
-    logFile.println(". registrovani korisnik: " + reg_kor);
-    server.send(200, "text/html", err_msg2);
-
-    logFile.println("poslata stranica za uspesno prijavljivanje");
-    logFile.println("**KRAJ FUNKCIJE HANDLE DATA **");
-    logFile.close();
-  } 
+  }
 }
 
-void adminData()
+void deleteData()
 {
-  String evidencija;
-  String datum = convertDateToStr(rtc.getTime());
-  myFile2 = SD.open(datum + ".txt");
-	if (myFile2)
+  bool err_flag = false;
+  if (server.arg("file") == "" || (server.arg("code") == ""))
   {
-    //while (myFile2.available())
-    //{
-			evidencija = myFile2.readStringUntil('\0');
-      //evidencija += "<br>";
-    //}
-    myFile.close();
+    //logFile.println("GRESKA: neka od polja su prazna!!");
+    err_flag = true;  
+  }
+  //provera flega za greske
+  if (err_flag)
+  {
+    server.send(200, "text/html", err_msg1);
   }
   else
   {
-    Serial.println("error opening " + datum + ".txt");
+    String kod = server.arg("code");
+    if (checkCode(kod))
+    {
+      String polje_datum = server.arg("file");
+      char datum[12];
+      int i;
+      for (i = 0; i < 8; i++)
+      {
+        datum[i] = polje_datum[i];
+      }
+      datum[i++] = '.';
+      datum[i++] = 't';
+      datum[i++] = 'x';
+      datum[i++] = 't';
+      if (SD.exists(datum))
+      {
+        SD.remove(datum);
+        server.send(200, "text/html", succ_remove);
+      }
+      else
+      {
+        server.send(200, "text/html", err_msg1);
+      }
+    }
+    else
+    {
+      server.send(200, "text/html", err_msg1);
+    }
   }
-  //Serial.println(evidencija);
-	server.send(200, "text/plain", evidencija);
+}
+
+void apiTest()
+{
+  bool err_flag = false;
+  if (server.arg("code") == "")
+  {
+    //logFile.println("GRESKA: neka od polja su prazna!!");
+    err_flag = true;  
+  }
+  //provera flega za greske
+  if (err_flag)
+  {
+    server.send(200, "text/html", err_msg1);
+  }
+  else
+  {
+    String kod = server.arg("code");
+    if (checkCode(kod))
+    {
+      server.send(200, "text/html", "1");
+    }
+    else
+    {
+      server.send(200, "text/html", err_msg1);
+    }
+  }
+}
+
+void listData()
+{
+  bool err_flag = false;
+  if (server.arg("code") == "")
+  {
+    //logFile.println("GRESKA: neka od polja su prazna!!");
+    err_flag = true;  
+  }
+  //provera flega za greske
+  if (err_flag)
+  {
+    server.send(200, "text/html", err_msg1);
+  }
+  else
+  {
+    String kod = server.arg("code");
+    if(checkCode(kod))
+    {
+      root = SD.open("/");
+      String list;
+      bool first = true;
+      while (true) 
+      {
+        File entry =  root.openNextFile();
+        if (!entry) 
+        {
+          // no more files
+          break;
+        }
+        if(checkFile(entry))
+        {
+          if(!first)
+          {
+            list += ",";
+          }
+          first = false;
+          //list += String(entry.name());  
+          list += String(entry.name()).substring(0,8);
+        }
+        //list += String(entry.name());
+        entry.close();
+      }
+      server.send(200, "text/plain", list);
+    }
+    else
+    {
+      //exception
+      server.send(200, "text/html", err_msg1);
+    }
+  }
 }
 
 void setup(void)
@@ -230,9 +384,15 @@ void setup(void)
   config.max_connection = 30; // how many stations can connect to ESP8266 softAP at most.
   wifi_softap_set_config(&config);// Set ESP8266 softap config
   server.on("/", handleRoot);
-  server.on("/metoda1", handleData);
-	server.on("/metoda2", adminPage);
-  server.on("/metoda3", adminData);
+  server.on("/regData", handleData);
+	server.on("/file", adminPage);
+  server.on("/getData", getData);
+  server.on("/delete", deletePage);
+  server.on("/deleteData", deleteData);
+  server.on("/api", apiPage);
+  server.on("/apiTest", apiTest);
+  server.on("/list", listPage);
+  server.on("/listData", listData);
   server.begin();
   Serial.println("HTTP server started");
   //SD Card Initialization
@@ -333,9 +493,9 @@ void client_status()
         {
           reg[i].vreme_ulaska = t;
           logFile = SD.open("loging.txt",FILE_WRITE);
-          logFile.println(reg[i].ime + " " + reg[i].prezime + " is in range, time: " + reg[i].vreme_ulaska);
+          logFile.println(reg[i].ime + " " + reg[i].prezime + " " + reg[i].id + " is in range, time: " + reg[i].vreme_ulaska);
           logFile.close();
-          Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + " is in range");
+          Serial.println(reg[i].ime + " " + reg[i].prezime + " " + reg[i].id + " is in range, time: " + reg[i].vreme_ulaska);
         }
         break;
       }
@@ -388,11 +548,11 @@ void client_status()
                 break;
             } 
           }
-          Serial.println(reg[i].ime + " " + reg[i].prezime + "|"+ reg[i].vreme_ulaska + " is out of range");
+          Serial.println(reg[i].ime + " " + reg[i].prezime + " " + reg[i].id + " is out of range, time: " + t);
           myFile2.println(reg[i].ime + "|" + reg[i].prezime + "|" + reg[i].id+ "|" + reg[i].vreme_ulaska + "|" + t);
           myFile2.close();
           logFile=SD.open("loging.txt", FILE_WRITE);
-          logFile.println(reg[i].ime + " " + reg[i].prezime + " is out of range, time: " + t);
+          logFile.println(reg[i].ime + " " + reg[i].prezime + " " + reg[i].id + " is out of range, time: " + t);
           logFile.close();
           reg[i].vreme_ulaska = "";
         }         
@@ -451,4 +611,79 @@ uint8_t str2mac(String str)
   uint8_t mac = (str[0] < 65) ? 16*(str[0] - 48) : 16*(str[0] - 55);
   mac += (str[1] < 65) ? str[1] - 48 : str[1] - 55;
   return mac;
+}
+
+bool checkRegClient()
+{
+  for (int i = 0; i < reg_num; i++)
+  {
+    stat_info = wifi_softap_get_station_info();
+    while (stat_info != NULL)
+    {
+      IPaddress = &stat_info->ip;
+      address   = IPaddress->addr;
+      if (address == server.client().remoteIP())
+      {   
+        if (reg[i].mac[0] == stat_info->bssid[0] && reg[i].mac[1] == stat_info->bssid[1] && reg[i].mac[2] == stat_info->bssid[2] &&
+            reg[i].mac[3] == stat_info->bssid[3] && reg[i].mac[4] == stat_info->bssid[4] && reg[i].mac[5] == stat_info->bssid[5])
+        {   
+          /*...........................*/
+          /*logovanje*/
+          if(logFile)
+          {
+            logFile.println("Vec je prijavljen na ovoj mac adresi");
+            logFile.println(reg[i].ime + " " + reg[i].prezime[i] + "|" + String(reg[i].mac[0]) + ":" + String(reg[i].mac[1]) + ":" + 
+                            String(reg[i].mac[2]) + ":" + String(reg[i].mac[3]) + ":" + String(reg[i].mac[4]) + ":" + String(reg[i].mac[5]) + 
+                            " je probao ponovo da se uloguje");
+            logFile.close();
+          }
+          /*...........................*/    
+          return true;
+        }
+        return false;
+      }
+      stat_info = STAILQ_NEXT(stat_info, next);
+    }
+    wifi_softap_free_station_info();
+  }
+}
+
+bool checkCode(String str)
+{
+  String kod2 = str + salt;
+  char kod1[kod2.length()];
+  int i;
+  for (i = 0; i < kod2.length(); i++)
+  {
+    kod1[i] = kod2[i];
+  }
+  kod1[i] = '\0';
+  unsigned char* hash = MD5::make_hash(kod1);
+  String md5str = MD5::make_digest(hash, 16);
+  free(hash);
+  if (md5str == md5)
+  {
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
+bool checkFile(File entry)
+{
+  if(entry.isDirectory())
+  {
+    return false;
+  }
+  String n = entry.name();
+  if (isDigit(n[0]) && isDigit(n[1]) && (n[2] == '_') && isDigit(n[3]) && isDigit(n[4]) && (n[5] == '_') && isDigit(n[6]) && isDigit(n[7]))
+  {
+    return true;
+  }
+  else
+  {
+    return false;
+  }
 }
