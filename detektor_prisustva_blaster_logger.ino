@@ -30,7 +30,9 @@ ESP8266WebServer server(80);
 File myFile;
 File myFile2;
 File logFile;
+File brisanje;
 File root;
+//File root;
 //Set pins:  CE, IO,CLK
 DS1302 rtc(0, 4, 5);
 struct station_info *stat_info;
@@ -65,8 +67,22 @@ void handleRoot()
     logFile.println("Provera da li je vec registrovan");      
   }
   /***************************/
+  String mac_str;
+  stat_info = wifi_softap_get_station_info();
+  while (stat_info != NULL)
+  {
+    IPaddress = &stat_info->ip;
+    address   = IPaddress->addr;
+    if (address == server.client().remoteIP())
+    {
+      mac_str = mac2str(stat_info->bssid, 0);
+      break;
+    }
+    stat_info = STAILQ_NEXT(stat_info, next);
+  }
+  wifi_softap_free_station_info();
   //F-ja koja zabranjuje ponovnu registraciju
-  bool postoji =  checkRegClient();
+  bool postoji =  checkRegClient(mac_str);
   if (postoji)
   {
     server.send(200, "text/html", err_msg3);
@@ -114,9 +130,23 @@ void handleData()
 	{
 		logFile.println("**POCETAK FUNKCIJE HANDLE DATA**");
 	}
-	/********************************/  
+	/********************************/
+  String mac_str;
+  stat_info = wifi_softap_get_station_info(); 
+  logFile.println("pocetak prolaska kroz listu stat_info"); 
+  while (stat_info != NULL)
+  {
+    IPaddress = &stat_info->ip;
+    address   = IPaddress->addr;
+    if (address == server.client().remoteIP())
+    {   
+      mac_str = mac2str(stat_info->bssid, 0);      
+      break;
+    }
+    stat_info = STAILQ_NEXT(stat_info, next);
+  } 
   //F-ja koja zabranjuje ponovnu registraciju
-  bool postoji = checkRegClient();
+  bool postoji = checkRegClient(mac_str);
   if (postoji)
   { 
     server.send(200, "text/html", err_msg3);
@@ -145,19 +175,6 @@ void handleData()
       reg[reg_num].id.replace("\n", "");
       reg[reg_num].id.replace("\r", "");
       reg[reg_num].id.replace("|", "");
-      stat_info = wifi_softap_get_station_info();
-      logFile.println("pocetak prolaska kroz listu stat_info"); 
-      while (stat_info != NULL)
-      {
-        IPaddress = &stat_info->ip;
-        address   = IPaddress->addr;
-        if (address == server.client().remoteIP())
-        {         
-          break;
-        }
-        stat_info = STAILQ_NEXT(stat_info, next);
-      }
-      logFile.println("dealociranje liste station_info");
       logFile.println("upisivanje mac adrese u kolekciju registrovanih"); 
       reg[reg_num].mac[0] = stat_info->bssid[0];
       reg[reg_num].mac[1] = stat_info->bssid[1];
@@ -165,6 +182,7 @@ void handleData()
       reg[reg_num].mac[3] = stat_info->bssid[3];
       reg[reg_num].mac[4] = stat_info->bssid[4];
       reg[reg_num].mac[5] = stat_info->bssid[5];
+      logFile.println("dealociranje liste station_info");
       wifi_softap_free_station_info();
       logFile.println("pocetak upisa podataka na sd karticu");
       logFile.close();       
@@ -262,14 +280,15 @@ void deleteData()
       datum[i++] = 't';
       datum[i++] = 'x';
       datum[i++] = 't';
-      if (SD.exists(datum))
+      datum[i] = '\0';
+      if (SD.remove(datum))
       {
-        SD.remove(datum);
         server.send(200, "text/html", succ_remove);
       }
       else
       {
-        server.send(200, "text/html", err_msg1);
+        server.send(200, "text/html", err_msg1); 
+        SD.exists("reg.txt");// stoji samo zbog baga biblioteke SD
       }
     }
     else
@@ -323,7 +342,7 @@ void listData()
   {
     String kod = server.arg("code");
     if(checkCode(kod))
-    {
+    { 
       root = SD.open("/");
       String list;
       bool first = true;
@@ -342,12 +361,14 @@ void listData()
             list += ",";
           }
           first = false;
-          //list += String(entry.name());  
-          list += String(entry.name()).substring(0,8);
+          //list += String(entry.name()); 
+          String s = String(entry.name()); 
+          list += s.substring(0, s.length()-4);
         }
         //list += String(entry.name());
         entry.close();
       }
+      root.close();
       server.send(200, "text/plain", list);
     }
     else
@@ -462,9 +483,9 @@ void setup(void)
     logFile.close();      
   }
   /***************************/
-  // Set the clock to run-mode, and enable the write protection
+  // Set the clock to run-mode, and disable the write protection
   rtc.halt(false);
-  rtc.writeProtect(true);
+  rtc.writeProtect(false);
 }
  
 void loop(void)
@@ -613,39 +634,26 @@ uint8_t str2mac(String str)
   return mac;
 }
 
-bool checkRegClient()
+bool checkRegClient(String mac)
 {
   for (int i = 0; i < reg_num; i++)
   {
-    stat_info = wifi_softap_get_station_info();
-    while (stat_info != NULL)
-    {
-      IPaddress = &stat_info->ip;
-      address   = IPaddress->addr;
-      if (address == server.client().remoteIP())
-      {   
-        if (reg[i].mac[0] == stat_info->bssid[0] && reg[i].mac[1] == stat_info->bssid[1] && reg[i].mac[2] == stat_info->bssid[2] &&
-            reg[i].mac[3] == stat_info->bssid[3] && reg[i].mac[4] == stat_info->bssid[4] && reg[i].mac[5] == stat_info->bssid[5])
-        {   
-          /*...........................*/
-          /*logovanje*/
-          if(logFile)
-          {
-            logFile.println("Vec je prijavljen na ovoj mac adresi");
-            logFile.println(reg[i].ime + " " + reg[i].prezime[i] + "|" + String(reg[i].mac[0]) + ":" + String(reg[i].mac[1]) + ":" + 
-                            String(reg[i].mac[2]) + ":" + String(reg[i].mac[3]) + ":" + String(reg[i].mac[4]) + ":" + String(reg[i].mac[5]) + 
-                            " je probao ponovo da se uloguje");
-            logFile.close();
-          }
-          /*...........................*/    
-          return true;
-        }
-        return false;
+    String mac_str_reg = mac2str(reg[i].mac, 0);
+    if (mac_str_reg == mac)
+    {   
+      /*...........................*/
+      /*logovanje*/
+      if(logFile)
+      {
+        logFile.println("Vec je prijavljen na ovoj mac adresi");
+        logFile.println(reg[i].ime + " " + reg[i].prezime[i] + "|" + mac + " je probao ponovo da se uloguje");
+        logFile.close();
       }
-      stat_info = STAILQ_NEXT(stat_info, next);
+      /*...........................*/    
+      return true;
     }
-    wifi_softap_free_station_info();
   }
+  return false;
 }
 
 bool checkCode(String str)
